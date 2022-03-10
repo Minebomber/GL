@@ -4,10 +4,10 @@
 #include <stdint.h>
 #include <cglm/cglm.h>
 
-#define GEOMETRY_MAX 2
-#define MATERIAL_MAX 4
+#define GEOMETRY_MAX 4
+#define MATERIAL_MAX 32
 #define TRANSFORM_MAX 80
-#define NODE_MAX 2
+#define NODE_MAX 4
 #define PART_MAX 80
 
 enum ATTR_LOCATION {
@@ -101,6 +101,6 @@ typedef struct {
 
 void scene_init(Scene* scene);
 void scene_destroy(Scene* scene);
-void scene_load(Scene* scene, const char* path, mat4 initialTransform);
+void scene_load(Scene* scene, const char* path, mat4 initialTransform, bool flipUVs);
 void scene_build_cache(Scene* scene);
 void scene_render(Scene* scene);

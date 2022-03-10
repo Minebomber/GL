@@ -4,6 +4,7 @@
 #include "shader.h"
 #include "scene.h"
 #include "stb_image.h"
+#include "light.h"
 
 #define WINDOW_WIDTH 800
 #define WINDOW_HEIGHT 600
@@ -15,6 +16,8 @@
 
 #define MOVEMENT_SPEED 3.0f
 #define ROTATION_SPEED 0.1f
+
+#define LIGHT_MAX 8
 
 enum UBO_BINDING {
 	UBO_GLOBAL,
@@ -38,7 +41,7 @@ typedef struct {
 	
 	unsigned int global_buffer;
 	unsigned int camera_buffer;
-	unsigned int light_buffer; // TODO
+	unsigned int light_buffer;
 	
 	struct {
 		unsigned int texture;
@@ -106,6 +109,7 @@ void on_setup(Application* app) {
 	glEnable(GL_DEBUG_OUTPUT);
 	glDebugMessageCallback(gl_log, NULL);
 	glDepthFunc(GL_LEQUAL);
+	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
 	create_shader(
 		&app->shaders[SHADER_DEFAULT], 2,
@@ -119,16 +123,30 @@ void on_setup(Application* app) {
 		(ShaderArgs) { GL_FRAGMENT_SHADER, "res/shaders/skybox.frag" }
 	);
 
-	// Camera setup
-	camera_init(&app->camera, app->window.width, app->window.height, CAMERA_FOV, CAMERA_NEAR, CAMERA_FAR);
-	glCreateBuffers(1, &app->camera_buffer);
-	glNamedBufferData(app->camera_buffer, 144, NULL, GL_DYNAMIC_DRAW);
-	glBindBufferBase(GL_UNIFORM_BUFFER, UBO_CAMERA, app->camera_buffer);
-
-	// Buffers setup
 	glCreateBuffers(1, &app->global_buffer);
 	glNamedBufferData(app->global_buffer, 16, NULL, GL_STATIC_DRAW);
 	glBindBufferBase(GL_UNIFORM_BUFFER, UBO_GLOBAL, app->global_buffer);
+
+	glCreateBuffers(1, &app->camera_buffer);
+	glNamedBufferData(app->camera_buffer, 144, NULL, GL_DYNAMIC_DRAW);
+	glBindBufferBase(GL_UNIFORM_BUFFER, UBO_CAMERA, app->camera_buffer);
+	camera_init(&app->camera, app->window.width, app->window.height, CAMERA_FOV, CAMERA_NEAR, CAMERA_FAR);
+
+	glCreateBuffers(1, &app->light_buffer);
+	glNamedBufferData(app->light_buffer, 16 + LIGHT_SIZE * LIGHT_MAX, NULL, GL_STATIC_DRAW);
+	glBindBufferBase(GL_UNIFORM_BUFFER, UBO_LIGHT, app->light_buffer);
+
+	Light l = {
+		.type = LIGHT_DIRECTIONAL,
+		.directionLinear = { 0.6, -1.0, 0.3 },
+		.ambientQuadratic = { 0.3, 0.3, 0.3 },
+		.diffuseCutOff = { 0.8, 0.8, 0.8 },
+		.specularOuterCutOff = { 1.0, 1.0, 1.0 }
+	};
+	uint lightCount = 1;
+	glNamedBufferSubData(app->light_buffer, 0, sizeof(uint), &lightCount);
+	glNamedBufferSubData(app->light_buffer, 16, sizeof(uint), &l.type);
+	glNamedBufferSubData(app->light_buffer, 32, sizeof(vec4) * 5, &l.positionConstant);
 
 	scene_init(&app->scene);
 
@@ -137,7 +155,7 @@ void on_setup(Application* app) {
 	glNamedBufferSubData(app->global_buffer, 0, 8, &app->scene.transform_handle);
 
 	mat4 modelMatrix; glm_mat4_identity(modelMatrix);
-	scene_load(&app->scene, "res/models/backpack/backpack.obj", modelMatrix);
+	scene_load(&app->scene, "res/models/nanosuit/nanosuit.obj", modelMatrix, true);
 
 	for (unsigned int i = 0; i < app->scene.n_geometry; i++)
 		app->scene.geometry[i].shader = app->shaders[SHADER_DEFAULT];

@@ -1,6 +1,12 @@
 #version 460 core
 #extension GL_ARB_bindless_texture : require
 
+#define LIGHT_DIRECTIONAL 0
+#define LIGHT_POINT 1
+#define LIGHT_SPOT 2
+
+#define LIGHT_MAX 8
+
 in VS_OUT {
 	flat ivec2 assign;
 	vec3 position;
@@ -25,21 +31,69 @@ layout (std140, binding = 2) uniform Materials {
 	Material u_materials[8];
 };
 
+struct Light {
+	uint type;
+	vec4 positionConstant;
+	vec4 directionLinear;
+	vec4 ambientQuadratic;
+	vec4 diffuseCutOff;
+	vec4 specularOuterCutOff;
+};
+layout (std140, binding = 3) uniform Lights {
+	uint u_lightCount;
+	Light u_lights[LIGHT_MAX];
+};
+
+vec3 lighting(Light light, vec3 normal, vec3 viewDirection, vec3 diffuseColor, vec3 specularColor, float shininess);
+
 void main() {
+	vec3 normal = normalize(fs_in.normal);
+	vec3 viewDirection = normalize(u_position - fs_in.position);
+
 	vec3 diffuseColor = texture(u_materials[fs_in.assign.x].diffuse, fs_in.texCoord).rgb;
 	vec3 specularColor = texture(u_materials[fs_in.assign.x].specular, fs_in.texCoord).rgb;
+	float shininess = 32.0;
 	
-	vec3 ambient = vec3(0.2) * diffuseColor;
-	
-	vec3 normal = normalize(fs_in.normal);
-	vec3 lightDirection = normalize(-vec3(0.5, -1.0, 0.25));
+	vec3 result = vec3(0);
+	for (uint i = 0; i < u_lightCount; i++) {
+		result += lighting(u_lights[i], normal, viewDirection, diffuseColor, specularColor, shininess);
+	}
+
+	o_fragColor = vec4(result, 1.0);
+}
+
+vec3 lighting(Light light, vec3 normal, vec3 viewDirection, vec3 diffuseColor, vec3 specularColor, float shininess) {
+	vec3 ambient = light.ambientQuadratic.rgb * diffuseColor;
+
+	vec3 lightDirection = (light.type == LIGHT_DIRECTIONAL) ? 
+		normalize(-light.directionLinear.xyz) :
+		normalize(light.positionConstant.xyz - fs_in.position);
+
 	float diffuseFactor = max(dot(normal, lightDirection), 0.0);
-	vec3 diffuse = diffuseFactor * diffuseColor;
+	vec3 diffuse = light.diffuseCutOff.rgb * diffuseFactor * diffuseColor;
 	
-	vec3 viewDirection = normalize(u_position - fs_in.position);
 	vec3 reflectDirection = reflect(-lightDirection, normal);
-	float specularFactor = pow(max(dot(viewDirection, reflectDirection), 0.0), 32.0);
-	vec3 specular = specularFactor * specularColor;
-	
-	o_fragColor = vec4(ambient + diffuse + specular, 1.0);
+	float specularFactor = pow(max(dot(viewDirection, reflectDirection), 0.0), shininess);
+	vec3 specular = light.specularOuterCutOff.rgb * specularFactor * specularColor;
+
+	if (light.type > LIGHT_DIRECTIONAL) {
+		if (light.type == LIGHT_SPOT) {
+			float theta = dot(lightDirection, -normalize(-light.directionLinear.xyz));
+			float epsilon = (light.diffuseCutOff.w - light.specularOuterCutOff.w);
+			float intensity = clamp((theta - light.specularOuterCutOff.w) / epsilon, 0.0, 1.0);
+			diffuse *= intensity;
+			specular *= intensity;
+		}
+		float d = length(light.positionConstant.xyz - fs_in.position);
+		float attenuation = 1.0 / (
+			light.positionConstant.w +
+			light.directionLinear.w * d +
+			light.ambientQuadratic.w * (d * d)
+		);
+		ambient *= attenuation;
+		diffuse *= attenuation;
+		specular *= attenuation;
+	}
+
+	return (ambient + diffuse + specular);	
 }

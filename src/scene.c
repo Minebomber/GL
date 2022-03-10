@@ -81,10 +81,10 @@ void scene_destroy(Scene* scene) {
 	}
 }
 
-void scene_load(Scene* scene, const char* path, mat4 initialTransform) {
+void scene_load(Scene* scene, const char* path, mat4 initialTransform, bool flipUVs) {
 	const struct aiScene* aiScn = aiImportFile(
 		path,
-		aiProcess_CalcTangentSpace | aiProcess_Triangulate | aiProcess_JoinIdenticalVertices | aiProcess_SortByPType
+		(flipUVs ? aiProcess_FlipUVs : 0) | aiProcess_CalcTangentSpace | aiProcess_Triangulate | aiProcess_JoinIdenticalVertices | aiProcess_SortByPType
 	);
 	if (!aiScn || aiScn->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !aiScn->mRootNode) {
 		plogf(LL_ERROR, "Failed to load model: %s. %s\n", path, aiGetErrorString());
@@ -163,7 +163,6 @@ void scene_build_cache(Scene* scene) {
 }
 
 void scene_render(Scene* scene) {
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	for (unsigned int i = 0; i < scene->n_cache; i++) {
 		CacheObject* cached = &scene->cache[i];
 		glUseProgram(cached->geometry->shader);
