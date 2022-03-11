@@ -143,11 +143,20 @@ void on_setup(Application* app) {
 		.diffuseCutOff = { 0.8, 0.8, 0.8 },
 		.specularOuterCutOff = { 1.0, 1.0, 1.0 }
 	};
-	uint lightCount = 1;
+	uint lightCount = 2;
 	glNamedBufferSubData(app->light_buffer, 0, sizeof(uint), &lightCount);
 	glNamedBufferSubData(app->light_buffer, 16, sizeof(uint), &l.type);
 	glNamedBufferSubData(app->light_buffer, 32, sizeof(vec4) * 5, &l.positionConstant);
 
+	l = (Light) {
+		.type = LIGHT_DIRECTIONAL,
+		.directionLinear = { -0.3, -1.0, -0.6 },
+		.ambientQuadratic = { 0.3, 0.3, 0.3 },
+		.diffuseCutOff = { 0.8, 0.8, 0.8 },
+		.specularOuterCutOff = { 1.0, 1.0, 1.0 }
+	};
+	glNamedBufferSubData(app->light_buffer, 16 + 96, sizeof(uint), &l.type);
+	glNamedBufferSubData(app->light_buffer, 32 + 96, sizeof(vec4) * 5, &l.positionConstant);
 	scene_init(&app->scene);
 
 	app->scene.transform_handle = glGetTextureHandleARB(app->scene.transform_texture);
@@ -155,7 +164,7 @@ void on_setup(Application* app) {
 	glNamedBufferSubData(app->global_buffer, 0, 8, &app->scene.transform_handle);
 
 	mat4 modelMatrix; glm_mat4_identity(modelMatrix);
-	scene_load(&app->scene, "res/models/nanosuit/nanosuit.obj", modelMatrix, true);
+	scene_load(&app->scene, "res/models/backpack/backpack.obj", modelMatrix, false);
 
 	for (unsigned int i = 0; i < app->scene.n_geometry; i++)
 		app->scene.geometry[i].shader = app->shaders[SHADER_DEFAULT];

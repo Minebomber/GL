@@ -20,7 +20,7 @@ static void node_world_transform(Node* node, mat4 dest);
 
 void scene_init(Scene* scene) {
 	glCreateBuffers(1, &scene->material_buffer);
-	glNamedBufferData(scene->material_buffer, 16 * MATERIAL_MAX, NULL, GL_STATIC_DRAW);
+	glNamedBufferData(scene->material_buffer, 32 * MATERIAL_MAX, NULL, GL_STATIC_DRAW);
 	glBindBufferBase(GL_UNIFORM_BUFFER, 2, scene->material_buffer);
 
 	glCreateBuffers(1, &scene->transform_buffer);
@@ -152,13 +152,19 @@ void scene_build_cache(Scene* scene) {
 		if (mat->diffuse.texture) {
 			mat->diffuse.handle = glGetTextureHandleARB(mat->diffuse.texture);
 			glMakeTextureHandleResidentARB(mat->diffuse.handle);
-			glNamedBufferSubData(scene->material_buffer, i * 16, 8, &mat->diffuse.handle);
+			glNamedBufferSubData(scene->material_buffer, i * 32, 8, &mat->diffuse.handle);
 		}
 		if (mat->specular.texture) {
 			mat->specular.handle = glGetTextureHandleARB(mat->specular.texture);
 			glMakeTextureHandleResidentARB(mat->specular.handle);
-			glNamedBufferSubData(scene->material_buffer, i * 16 + 8, 8, &mat->specular.handle);
+			glNamedBufferSubData(scene->material_buffer, i * 32 + 8, 8, &mat->specular.handle);
 		}
+		if (mat->normal.texture) {
+			mat->normal.handle = glGetTextureHandleARB(mat->normal.texture);
+			glMakeTextureHandleResidentARB(mat->normal.handle);
+			glNamedBufferSubData(scene->material_buffer, i * 32 + 16, 8, &mat->normal.handle);
+		}
+		glNamedBufferSubData(scene->material_buffer, i * 32 + 24, sizeof(float), &mat->shininess);
 	}
 }
 
@@ -234,9 +240,10 @@ static void scene_load_geometry(Scene* scene, const struct aiScene* aiScn, unsig
 		for (unsigned int j = 0; j < aiMsh->mNumVertices; j++) {
 			Vertex* v = &vertices[vIdx++];
 			glm_vec3_copy((vec3){	aiMsh->mVertices[j].x, aiMsh->mVertices[j].y,	aiMsh->mVertices[j].z	}, v->position);
-			if (aiMsh->mTextureCoords[0])
-				glm_vec2_copy((vec2){ aiMsh->mTextureCoords[0][j].x, aiMsh->mTextureCoords[0][j].y }, v->texCoord);
+			glm_vec2_copy((vec2){ aiMsh->mTextureCoords[0][j].x, aiMsh->mTextureCoords[0][j].y }, v->texCoord);
 			glm_vec3_copy((vec3){ aiMsh->mNormals[j].x, aiMsh->mNormals[j].y, aiMsh->mNormals[j].z }, v->normal);
+			glm_vec3_copy((vec3){ aiMsh->mTangents[j].x, aiMsh->mTangents[j].y, aiMsh->mTangents[j].z }, v->tangent);
+			glm_vec3_copy((vec3){ aiMsh->mBitangents[j].x, aiMsh->mBitangents[j].y, aiMsh->mBitangents[j].z }, v->bitangent);
 		}
 		p->n_index = 0;
 		for (unsigned int j = 0; j < aiMsh->mNumFaces; j++) {
@@ -263,6 +270,14 @@ static void scene_load_geometry(Scene* scene, const struct aiScene* aiScn, unsig
 	glEnableVertexArrayAttrib(g->vertex_array, ATTR_NORMAL);
 	glVertexArrayAttribBinding(g->vertex_array, ATTR_NORMAL, 0);
 	glVertexArrayAttribFormat(g->vertex_array, ATTR_NORMAL, 3, GL_FLOAT, GL_FALSE, offsetof(Vertex, normal));
+	
+	glEnableVertexArrayAttrib(g->vertex_array, ATTR_TANGENT);
+	glVertexArrayAttribBinding(g->vertex_array, ATTR_TANGENT, 0);
+	glVertexArrayAttribFormat(g->vertex_array, ATTR_TANGENT, 3, GL_FLOAT, GL_FALSE, offsetof(Vertex, tangent));
+	
+	glEnableVertexArrayAttrib(g->vertex_array, ATTR_BITANGENT);
+	glVertexArrayAttribBinding(g->vertex_array, ATTR_BITANGENT, 0);
+	glVertexArrayAttribFormat(g->vertex_array, ATTR_BITANGENT, 3, GL_FLOAT, GL_FALSE, offsetof(Vertex, bitangent));
 
 	glVertexArrayVertexBuffer(g->vertex_array, 0, g->vertex_buffer, 0, sizeof(Vertex));
 	glVertexArrayElementBuffer(g->vertex_array, g->element_buffer);
@@ -272,6 +287,9 @@ static void scene_load_geometry(Scene* scene, const struct aiScene* aiScn, unsig
 	glVertexArrayAttribIFormat(g->vertex_array, ATTR_ASSIGN, 2, GL_INT, 0);
 	glVertexArrayVertexBuffer(g->vertex_array, 1, scene->assign_buffer, 0, sizeof(ivec2));
 	glVertexArrayBindingDivisor(g->vertex_array, 1, 1);
+
+	plogf(LL_INFO, "Created geometry { vao:%u, vbo:%u, ebo:%u }; %lu vertices, %lu indices\n",
+		g->vertex_array, g->vertex_buffer, g->element_buffer, vIdx, iIdx);
 }
 
 static void scene_load_materials(Scene* scene, const char* path, const struct aiScene* aiScn) {
@@ -284,8 +302,14 @@ static void scene_load_materials(Scene* scene, const char* path, const struct ai
 		if (aiGetMaterialTextureCount(aiMat, aiTextureType_SPECULAR)) {
 			scene_load_texture(&mat->specular.texture, path, aiMat, aiTextureType_SPECULAR);
 		}
+		if (aiGetMaterialTextureCount(aiMat, aiTextureType_HEIGHT)) {
+			scene_load_texture(&mat->normal.texture, path, aiMat, aiTextureType_HEIGHT);
+		}
 		ai_real shininess = 32.0f;
 		mat->shininess = shininess;
+	
+		plogf(LL_INFO, "Created material[%u] { diff:%u, spec:%u, norm:%u }\n",
+			i, mat->diffuse.texture, mat->specular.texture, mat->normal.texture);
 	}
 }
 
@@ -300,10 +324,12 @@ static void scene_load_texture(unsigned int* texture, const char* path, const st
 	if (!load_texture(texture, buffer, true, GL_REPEAT, GL_REPEAT, GL_LINEAR_MIPMAP_LINEAR, GL_LINEAR)) {
 		plogf(LL_ERROR, "Failed to load material texture: %s\n", buffer);
 	}
+	plogf(LL_INFO, "Loaded texture: %s\n", path);
 }
 
 static void scene_load_node(Scene* scene, Node** node, const struct aiScene* aiScn, const struct aiNode* aiNd, Node* parent, unsigned int geometryOffset) {
 	Node* nd = node_new(aiNd->mNumMeshes, aiNd->mNumChildren);
+	plogf(LL_INFO, "Created node: %s\n", aiNd->mName.data);
 	if (!nd) {
 		plogf(LL_ERROR, "Node allocation failed\n");
 		return;

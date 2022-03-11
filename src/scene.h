@@ -15,12 +15,16 @@ enum ATTR_LOCATION {
 	ATTR_POSITION,
 	ATTR_TEXCOORD,
 	ATTR_NORMAL,
+	ATTR_TANGENT,
+	ATTR_BITANGENT,
 };
 
 typedef struct {
 	vec3 position;
 	vec2 texCoord;
 	vec3 normal;
+	vec3 tangent;
+	vec3 bitangent;
 } Vertex;
 
 typedef struct {
