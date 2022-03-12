@@ -6,9 +6,9 @@
 
 #define GEOMETRY_MAX 4
 #define MATERIAL_MAX 32
-#define TRANSFORM_MAX 80
+#define TRANSFORM_MAX 4
 #define NODE_MAX 4
-#define PART_MAX 80
+#define PART_MAX 4
 
 enum ATTR_LOCATION {
 	ATTR_ASSIGN,
@@ -77,7 +77,6 @@ typedef struct {
 typedef struct {
 	Geometry* geometry;
 	unsigned int n_commands;
-	DrawIndirectCommand commands[TRANSFORM_MAX];
 } CacheObject;
 
 typedef struct {
@@ -86,7 +85,7 @@ typedef struct {
 	unsigned int n_materials;
 	Material materials[MATERIAL_MAX];
 	unsigned int material_buffer;
-	
+
 	unsigned int n_transform;
 	mat4 transform[TRANSFORM_MAX];
 	unsigned int transform_buffer;

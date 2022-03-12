@@ -109,6 +109,7 @@ void scene_load(Scene* scene, const char* path, mat4 initialTransform, bool flip
 }
 
 void scene_build_cache(Scene* scene) {
+	DrawIndirectCommand* commands = malloc(sizeof(DrawIndirectCommand) * TRANSFORM_MAX);
 	for (unsigned int i = 0; i < scene->n_nodes; i++) {
 		Node* node = scene->nodes[i];
 		CacheObject* cached = &scene->cache[scene->n_cache++];
@@ -121,7 +122,7 @@ void scene_build_cache(Scene* scene) {
 			Node* n = queue[--nQueue];
 			for (unsigned int j = 0; j < n->n_parts; j++) {
 				Part* part = node_parts(n)[j];
-				DrawIndirectCommand* cmd = &cached->commands[cached->n_commands++];
+				DrawIndirectCommand* cmd = &commands[cached->n_commands++];
 				cmd->n_index = part->n_index;
 				cmd->n_instance = part->n_instance;
 				cmd->base_index = part->base_index;
@@ -140,10 +141,11 @@ void scene_build_cache(Scene* scene) {
 		glNamedBufferData(
 			cached->geometry->indirect_buffer,
 			cached->n_commands * sizeof(DrawIndirectCommand),
-			cached->commands,
+			commands,
 			GL_STATIC_DRAW
 		);
 	}
+	free(commands);
 
 	glNamedBufferSubData(scene->transform_buffer, 0, sizeof(mat4) * scene->n_transform, scene->transform);
 
@@ -316,6 +318,7 @@ static void scene_load_materials(Scene* scene, const char* path, const struct ai
 static void scene_load_texture(unsigned int* texture, const char* path, const struct aiMaterial* aiMat, enum aiTextureType type) {
 	struct aiString name;
 	aiGetMaterialTexture(aiMat, type, 0, &name, NULL, NULL, NULL, NULL, NULL, NULL);
+
 	size_t bufferSize = strlen(path) + name.length + 2;
 	char buffer[bufferSize];
 	strcpy(buffer, path);
