@@ -7,10 +7,11 @@
 #include "texture.h"
 #include "log.h"
 
-static Node* node_new(unsigned int numParts, unsigned int numChildren);
-static void node_delete(Node** node);
-static inline Part** node_parts(const Node* node);
-static inline Node** node_children(const Node* node);
+Part** node_parts(const Node* node);
+Node** node_children(const Node* node);
+
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+#define MAX(a, b) (((a) > (b)) ? (a) : (b))
 
 static void scene_load_geometry(Scene* scene, const struct aiScene* aiScn, unsigned int materialOffset);
 static void scene_load_materials(Scene* scene, const char* path, const struct aiScene* aiScn);
@@ -108,47 +109,137 @@ void scene_load(Scene* scene, const char* path, mat4 initialTransform, bool flip
 	glm_mat4_mul(initialTransform, node->transform, node->transform);
 }
 
+static int part_compare(const void* a, const void* b) {
+	if (!a) return -1;
+	if (!b) return 1;
+	const Part *p = a, *q = b;
+	int n_index = p->n_index - q->n_index;
+	int base_index = p->base_index - q->base_index;
+	int base_vertex = p->base_vertex - q->base_vertex;
+	if (!n_index && !base_index && !base_vertex) return 0;
+	return p - q;
+}
+
+static int cache_part_compare(const void* a, const void* b) {
+	if (!a) return -1;
+	if (!b) return 1;
+	const CachePart *p = a, *q = b;
+	int geometry = p->node->geometry - q->node->geometry;
+	if (geometry) return geometry;
+	return part_compare(p->part, q->part);
+}
+
 void scene_build_cache(Scene* scene) {
-	DrawIndirectCommand* commands = malloc(sizeof(DrawIndirectCommand) * TRANSFORM_MAX);
+	// Count total parts in scene to allocate cache
+	unsigned int partCount = 0;
+	for (unsigned int i = 0; i < scene->n_nodes; i++) {
+		// Traverse each tree
+		Node* node = scene->nodes[i];
+		Node* queue[128];
+		unsigned int nQueue = 1;
+		queue[0] = node;
+		while (nQueue) {
+			Node* n = queue[--nQueue];
+			// Increment part total
+			partCount += n->n_parts;
+			// Traverse children
+			for (unsigned int j = 0; j < n->n_children; j++)
+				queue[nQueue++] = node_children(n)[j];
+		}
+	}
+	
+	// Build parts list
+	// Same loop as in counting, this time copy the data
+	unsigned int n_parts = 0;
+	CachePart* parts = malloc(sizeof(CachePart) * partCount);
 	for (unsigned int i = 0; i < scene->n_nodes; i++) {
 		Node* node = scene->nodes[i];
-		CacheObject* cached = &scene->cache[scene->n_cache++];
-		cached->geometry = node->geometry;
-
 		Node* queue[128];
 		unsigned int nQueue = 1;
 		queue[0] = node;
 		while (nQueue) {
 			Node* n = queue[--nQueue];
 			for (unsigned int j = 0; j < n->n_parts; j++) {
-				Part* part = node_parts(n)[j];
-				DrawIndirectCommand* cmd = &commands[cached->n_commands++];
-				cmd->n_index = part->n_index;
-				cmd->n_instance = part->n_instance;
-				cmd->base_index = part->base_index;
-				cmd->base_vertex = part->base_vertex;
-
-				node_world_transform(node, scene->transform[scene->n_transform]);
-				ivec2 assign = { part->material, scene->n_transform };
-				glNamedBufferSubData(scene->assign_buffer, scene->n_transform * sizeof(ivec2), sizeof(ivec2), assign);
-				cmd->base_instance = scene->n_transform++;
+				CachePart* cached = &parts[n_parts++];
+				cached->part = node_parts(n)[j];
+				cached->node = n;
 			}
 			for (unsigned int j = 0; j < n->n_children; j++)
 				queue[nQueue++] = node_children(n)[j];
 		}
-		
-		glCreateBuffers(1, &cached->geometry->indirect_buffer);
+	}
+	// Sort parts by geometry and part to instance identical parts
+	qsort(parts, n_parts, sizeof(CachePart), cache_part_compare);
+
+	DrawIndirectCommand* commands = malloc(sizeof(DrawIndirectCommand) * TRANSFORM_MAX);
+	mat4* transform = malloc(sizeof(mat4) * TRANSFORM_MAX);
+	unsigned int nTransform = 0;
+
+	// Build render cache
+	// New cacheobject when geometry changes
+	// New cachepart when part changes, same parts increment instance
+	Geometry* currentGeometry = NULL;
+	CacheObject* currentCache = NULL;
+	Part* currentPart = NULL;
+	DrawIndirectCommand* command = NULL;
+	for (unsigned int i = 0; i < n_parts; i++) {
+		CachePart* cachePart = &parts[i];
+		// Switch object if geometry changes
+		if (cachePart->node->geometry != currentGeometry) {
+			plogf(LL_INFO, "Switching geometry\n");
+			// Write commands for old geometry
+			if (currentGeometry) {
+				plogf(LL_INFO, "Writing indirect buffer\n");
+				glCreateBuffers(1, &currentGeometry->indirect_buffer);
+				glNamedBufferData(
+					currentGeometry->indirect_buffer,
+					currentCache->n_commands * sizeof(DrawIndirectCommand),
+					commands,
+					GL_STATIC_DRAW
+				);
+			}
+			// Setup new geometry
+			currentGeometry = cachePart->node->geometry;
+			currentCache = &scene->cache[scene->n_cache++];
+			currentCache->geometry = currentGeometry;
+		}
+		// Switch command if part changes (vertices/indices, not on material change)
+		if (part_compare(cachePart->part, currentPart)) {
+			plogf(LL_INFO, "Switching part\n");
+			currentPart = cachePart->part;
+			command = &commands[currentCache->n_commands++];
+			// Initialize new command
+			command->n_index = currentPart->n_index;
+			command->n_instance = 0;
+			command->base_index = currentPart->base_index;
+			command->base_vertex = currentPart->base_vertex;
+			command->base_instance = nTransform;
+		}
+		// Setup instance transform and assign
+		command->n_instance++;
+		node_world_transform(cachePart->node, transform[nTransform]);
+		plogf(LL_INFO, "Adding assign { %u, %u }\n", cachePart->part->material, nTransform);
+		ivec2 assign = { cachePart->part->material, nTransform };
+		glNamedBufferSubData(scene->assign_buffer, nTransform * sizeof(ivec2), sizeof(ivec2), assign);
+		nTransform++;
+	}
+	free(parts);
+	// Last processed geometry didn't get switched, save it (if parts > 0)
+	if (currentGeometry) {
+		glCreateBuffers(1, &currentGeometry->indirect_buffer);
 		glNamedBufferData(
-			cached->geometry->indirect_buffer,
-			cached->n_commands * sizeof(DrawIndirectCommand),
+			currentGeometry->indirect_buffer,
+			currentCache->n_commands * sizeof(DrawIndirectCommand),
 			commands,
 			GL_STATIC_DRAW
 		);
 	}
 	free(commands);
-
-	glNamedBufferSubData(scene->transform_buffer, 0, sizeof(mat4) * scene->n_transform, scene->transform);
-
+	// Buffer transforms
+	glNamedBufferSubData(scene->transform_buffer, 0, sizeof(mat4) * nTransform, transform);
+	free(transform);
+	
+	// Buffer materials
 	for (unsigned int i = 0; i < scene->n_materials; i++) {
 		Material* mat = &scene->materials[i];
 		if (mat->diffuse.texture) {
@@ -180,15 +271,15 @@ void scene_render(Scene* scene) {
 	}
 }
 
-static Node* node_new(unsigned int numParts, unsigned int numChildren) {
-	Node* node = calloc(1, offsetof(Node, data) + sizeof(Part*) * numParts + sizeof(Node*) * numChildren);
+Node* node_new(unsigned int nParts, unsigned int nChildren) {
+	Node* node = calloc(1, offsetof(Node, data) + sizeof(Part*) * nParts + sizeof(Node*) * nChildren);
 	if (!node) return NULL;
-	node->n_parts = numParts;
-	node->n_children = numChildren;
+	node->n_parts = nParts;
+	node->n_children = nChildren;
 	return node;
 }
 
-static void node_delete(Node** node) {
+void node_delete(Node** node) {
 	if (!node || !*node) return;
 	for (unsigned int i = 0; i < (*node)->n_children; i++)
 		node_delete(&node_children(*node)[i]);
@@ -196,12 +287,17 @@ static void node_delete(Node** node) {
 	*node = NULL;
 }
 
-static inline Part** node_parts(const Node* node) {
-	return (Part**)&node->data;
-}
-
-static inline Node** node_children(const Node* node) {
-	return (Node**)(&node->data + sizeof(Part*) * node->n_parts);
+void node_resize(Node** node, unsigned int nParts, unsigned int nChildren) {
+	if (!node || !*node) return;
+	Node* new = node_new(nParts, nChildren);
+	if (!new) return;
+	memcpy(node_parts(new), node_parts(*node), MIN(nParts, (*node)->n_parts) * sizeof(Part*));
+	memcpy(node_children(new), node_children(*node), MIN(nChildren, (*node)->n_children) * sizeof(Node*));
+	// Delete children that dont fit in new size
+	for (unsigned int i = nChildren; i < (*node)->n_children; i++)
+		node_delete(&node_children(*node)[i]);
+	free(*node);
+	*node = new;
 }
 
 static void scene_load_geometry(Scene* scene, const struct aiScene* aiScn, unsigned int materialOffset) {
@@ -233,7 +329,6 @@ static void scene_load_geometry(Scene* scene, const struct aiScene* aiScn, unsig
 		}
 		p->base_vertex = vIdx;
 		p->base_index = iIdx;
-		p->n_instance = 1;
 
 		const struct aiMesh* aiMsh = aiScn->mMeshes[i];
 		

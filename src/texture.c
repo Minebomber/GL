@@ -38,3 +38,9 @@ bool load_texture(unsigned int* id, const char* path, bool mipmap, int wrapS, in
 
 	return true;
 }
+
+void load_texture_color(unsigned int* id, unsigned char color[3]) {
+	glCreateTextures(GL_TEXTURE_2D, 1, id);
+	glTextureStorage2D(*id, 1, GL_RGB8, 1, 1);
+	glTextureSubImage2D(*id, 0, 0, 0, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, color);
+}

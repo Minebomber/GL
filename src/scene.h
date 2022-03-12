@@ -4,10 +4,12 @@
 #include <stdint.h>
 #include <cglm/cglm.h>
 
-#define GEOMETRY_MAX 4
-#define MATERIAL_MAX 32
-#define TRANSFORM_MAX 4
-#define NODE_MAX 4
+#define N_SIDE 8
+
+#define GEOMETRY_MAX 8
+#define MATERIAL_MAX 8
+#define TRANSFORM_MAX N_SIDE * N_SIDE * N_SIDE * N_SIDE
+#define NODE_MAX TRANSFORM_MAX
 #define PART_MAX 4
 
 enum ATTR_LOCATION {
@@ -29,7 +31,6 @@ typedef struct {
 
 typedef struct {
 	unsigned int n_index;
-	unsigned int n_instance;
 	unsigned int base_index;
 	unsigned int base_vertex;
 	unsigned int material;
@@ -80,14 +81,17 @@ typedef struct {
 } CacheObject;
 
 typedef struct {
+	Part* part;
+	Node* node;
+} CachePart;
+
+typedef struct {
 	unsigned int assign_buffer;
 
 	unsigned int n_materials;
 	Material materials[MATERIAL_MAX];
 	unsigned int material_buffer;
 
-	unsigned int n_transform;
-	mat4 transform[TRANSFORM_MAX];
 	unsigned int transform_buffer;
 	unsigned int transform_texture;
 	uint64_t transform_handle;
@@ -107,3 +111,15 @@ void scene_destroy(Scene* scene);
 void scene_load(Scene* scene, const char* path, mat4 initialTransform, bool flipUVs);
 void scene_build_cache(Scene* scene);
 void scene_render(Scene* scene);
+
+Node* node_new(unsigned int nParts, unsigned int nChildren);
+void node_delete(Node** node);
+void node_resize(Node** node, unsigned int nParts, unsigned int nChildren);
+
+inline Part** node_parts(const Node* node) {
+	return (Part**)&node->data;
+}
+
+inline Node** node_children(const Node* node) {
+	return (Node**)(&node->data + sizeof(Part*) * node->n_parts);
+}

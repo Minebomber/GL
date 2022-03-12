@@ -3,8 +3,9 @@
 #include "camera.h"
 #include "shader.h"
 #include "scene.h"
-#include "stb_image.h"
 #include "light.h"
+#include "texture.h"
+#include "stb_image.h"
 
 #define WINDOW_WIDTH 800
 #define WINDOW_HEIGHT 600
@@ -14,10 +15,12 @@
 #define CAMERA_NEAR 0.1f
 #define CAMERA_FAR 100.f
 
-#define MOVEMENT_SPEED 3.0f
+#define MOVEMENT_SPEED 5.0f
 #define ROTATION_SPEED 0.1f
 
 #define LIGHT_MAX 8
+
+#define vec3(x, y, z) (vec3){ x, y, z }
 
 enum UBO_BINDING {
 	UBO_GLOBAL,
@@ -157,17 +160,45 @@ void on_setup(Application* app) {
 	app->scene.transform_handle = glGetTextureHandleARB(app->scene.transform_texture);
 	glMakeTextureHandleResidentARB(app->scene.transform_handle);
 	glNamedBufferSubData(app->global_buffer, 0, 8, &app->scene.transform_handle);
-
+	// Load cube model
 	mat4 modelMatrix; glm_mat4_identity(modelMatrix);
 	scene_load(&app->scene, "res/models/cube/cube.obj", modelMatrix, false);
-
+	// Load floor material
+	Material* floorMat = &app->scene.materials[app->scene.n_materials++];
+	load_texture_color(&floorMat->diffuse.texture, (unsigned char[3]){ 85, 170, 255 });
+	load_texture_color(&floorMat->specular.texture, (unsigned char[3]){ 64, 64, 64 });
+	floorMat->shininess = 1.0f;
+	// Insert floor part into cube geometry (same mesh, different material)
+	Geometry* cubeGeometry = &app->scene.geometry[0];
+	Part* cubePart = &cubeGeometry->parts[0];
+	Part* floorPart = &cubeGeometry->parts[1];
+	floorPart->n_index = cubePart->n_index;
+	floorPart->base_index = cubePart->base_index;
+	floorPart->base_vertex = cubePart->base_vertex;
+	floorPart->material = 2;
+	// Create node & transform for floor
+	Node* floorNode = node_new(1, 0);
+	floorNode->geometry = &app->scene.geometry[0];
 	glm_translate(modelMatrix, (vec3){ 0, -2, 0 });
 	glm_scale(modelMatrix, (vec3){ 25, 1, 25 });
-	//scene_load(&app->scene, "res/models/cube/cube.obj", modelMatrix, false);
-	glm_mat4_copy(modelMatrix, app->scene.transform[app->scene.n_transform++]);
-	ivec2 assign = { 1, 0 };
-	glNamedBufferSubData(app->scene.assign_buffer, 2 * sizeof(ivec2), sizeof(ivec2), assign);
-	app->scene.geometry[0].parts[0].n_instance = 2;
+	glm_mat4_copy(modelMatrix, floorNode->transform);
+	node_parts(floorNode)[0] = floorPart;
+	app->scene.nodes[app->scene.n_nodes++] = floorNode;
+
+	for (unsigned int i = 0; i < N_SIDE; i++) {
+		for (unsigned int j = 0; j < N_SIDE; j++) {
+			for (unsigned int k = 0; k < N_SIDE; k++) {
+				float x = 2.0f + (2.0f * i * N_SIDE) - (N_SIDE);
+				float y = 2.0f + (2.0f * j * N_SIDE) - (N_SIDE);
+				float z = 2.0f + (2.0f * k * N_SIDE) - (N_SIDE);
+				Node* iCubeNode = node_new(1, 0);
+				iCubeNode->geometry = &app->scene.geometry[0];
+				glm_translate_make(iCubeNode->transform, (vec3) { x, y, z });
+				node_parts(iCubeNode)[0] = cubePart;
+				app->scene.nodes[app->scene.n_nodes++] = iCubeNode;
+			}
+		}
+	}
 
 	for (unsigned int i = 0; i < app->scene.n_geometry; i++)
 		app->scene.geometry[i].shader = app->shaders[SHADER_DEFAULT];
