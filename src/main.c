@@ -110,6 +110,8 @@ void on_setup(Application* app) {
 	glDebugMessageCallback(gl_log, NULL);
 	glDepthFunc(GL_LEQUAL);
 	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+	glEnable(GL_CULL_FACE);
+	glCullFace(GL_BACK);
 
 	create_shader(
 		&app->shaders[SHADER_DEFAULT], 2,
@@ -136,6 +138,9 @@ void on_setup(Application* app) {
 	glNamedBufferData(app->light_buffer, 16 + LIGHT_SIZE * LIGHT_MAX, NULL, GL_STATIC_DRAW);
 	glBindBufferBase(GL_UNIFORM_BUFFER, UBO_LIGHT, app->light_buffer);
 
+	uint lightCount = 1;
+	glNamedBufferSubData(app->light_buffer, 0, sizeof(uint), &lightCount);
+
 	Light l = {
 		.type = LIGHT_DIRECTIONAL,
 		.directionLinear = { 0.6, -1.0, 0.3 },
@@ -143,20 +148,10 @@ void on_setup(Application* app) {
 		.diffuseCutOff = { 0.8, 0.8, 0.8 },
 		.specularOuterCutOff = { 1.0, 1.0, 1.0 }
 	};
-	uint lightCount = 2;
-	glNamedBufferSubData(app->light_buffer, 0, sizeof(uint), &lightCount);
+
 	glNamedBufferSubData(app->light_buffer, 16, sizeof(uint), &l.type);
 	glNamedBufferSubData(app->light_buffer, 32, sizeof(vec4) * 5, &l.positionConstant);
-
-	l = (Light) {
-		.type = LIGHT_DIRECTIONAL,
-		.directionLinear = { -0.3, -1.0, -0.6 },
-		.ambientQuadratic = { 0.3, 0.3, 0.3 },
-		.diffuseCutOff = { 0.8, 0.8, 0.8 },
-		.specularOuterCutOff = { 1.0, 1.0, 1.0 }
-	};
-	glNamedBufferSubData(app->light_buffer, 16 + 96, sizeof(uint), &l.type);
-	glNamedBufferSubData(app->light_buffer, 32 + 96, sizeof(vec4) * 5, &l.positionConstant);
+	
 	scene_init(&app->scene);
 
 	app->scene.transform_handle = glGetTextureHandleARB(app->scene.transform_texture);
@@ -164,7 +159,15 @@ void on_setup(Application* app) {
 	glNamedBufferSubData(app->global_buffer, 0, 8, &app->scene.transform_handle);
 
 	mat4 modelMatrix; glm_mat4_identity(modelMatrix);
-	scene_load(&app->scene, "res/models/backpack/backpack.obj", modelMatrix, false);
+	scene_load(&app->scene, "res/models/cube/cube.obj", modelMatrix, false);
+
+	glm_translate(modelMatrix, (vec3){ 0, -2, 0 });
+	glm_scale(modelMatrix, (vec3){ 25, 1, 25 });
+	//scene_load(&app->scene, "res/models/cube/cube.obj", modelMatrix, false);
+	glm_mat4_copy(modelMatrix, app->scene.transform[app->scene.n_transform++]);
+	ivec2 assign = { 1, 0 };
+	glNamedBufferSubData(app->scene.assign_buffer, 2 * sizeof(ivec2), sizeof(ivec2), assign);
+	app->scene.geometry[0].parts[0].n_instance = 2;
 
 	for (unsigned int i = 0; i < app->scene.n_geometry; i++)
 		app->scene.geometry[i].shader = app->shaders[SHADER_DEFAULT];

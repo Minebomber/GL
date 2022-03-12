@@ -54,7 +54,7 @@ vec3 lighting(Light light, vec3 normal, vec3 viewDirection, vec3 diffuseColor, v
 
 void main() {
 	vec3 normal = (u_materials[fs_in.assign.x].normal > 0) ?
-		normalize(fs_in.TBN * (/*normalize*/(texture(sampler2D(u_materials[fs_in.assign.x].normal), fs_in.texCoord).rgb) * 2.0 - 1.0)) :
+		normalize(fs_in.TBN * ((texture(sampler2D(u_materials[fs_in.assign.x].normal), fs_in.texCoord).rgb) * 2.0 - 1.0)) :
 		normalize(fs_in.normal);
 
 	vec3 viewDirection = normalize(u_position - fs_in.position);
@@ -85,14 +85,15 @@ vec3 lighting(Light light, vec3 normal, vec3 viewDirection, vec3 diffuseColor, v
 	float specularFactor = pow(max(dot(viewDirection, reflectDirection), 0.0), shininess);
 	vec3 specular = light.specularOuterCutOff.rgb * specularFactor * specularColor;
 
+	if (light.type == LIGHT_SPOT) {
+		float theta = dot(lightDirection, normalize(-(light.directionLinear.xyz)));
+		float epsilon = (light.diffuseCutOff.w - light.specularOuterCutOff.w);
+		float intensity = clamp((theta - light.specularOuterCutOff.w) / epsilon, 0.0, 1.0);
+		diffuse *= intensity;
+		specular *= intensity;
+	}
+
 	if (light.type > LIGHT_DIRECTIONAL) {
-		if (light.type == LIGHT_SPOT) {
-			float theta = dot(lightDirection, -normalize(-light.directionLinear.xyz));
-			float epsilon = (light.diffuseCutOff.w - light.specularOuterCutOff.w);
-			float intensity = clamp((theta - light.specularOuterCutOff.w) / epsilon, 0.0, 1.0);
-			diffuse *= intensity;
-			specular *= intensity;
-		}
 		float d = length(light.positionConstant.xyz - fs_in.position);
 		float attenuation = 1.0 / (
 			light.positionConstant.w +
