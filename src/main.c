@@ -160,7 +160,7 @@ void on_setup(Application* app) {
 	glNamedBufferSubData(app->global_buffer, 0, 8, &app->scene.transform_handle);
 	// Load cube model
 	mat4 modelMatrix; glm_mat4_identity(modelMatrix);
-	glm_translate(modelMatrix, (vec3){ 0, 5, 0 });
+	glm_translate(modelMatrix, (vec3){ 5, 0, 0 });
 	scene_load(&app->scene, "res/models/cube/cube.obj", 0, modelMatrix, false);
 	// Load floor material
 	Material* floorMat = &app->scene.materials[app->scene.n_materials++];
@@ -205,6 +205,7 @@ void on_setup(Application* app) {
 			}
 		}
 	}
+
 	glm_mat4_identity(modelMatrix);
 	scene_load(&app->scene, "res/models/backpack/backpack.obj", 0, modelMatrix, false);
 

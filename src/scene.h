@@ -38,6 +38,7 @@ typedef struct {
 } Part;
 
 typedef struct {
+	unsigned int primitive;
 	unsigned int vertex_array;
 	unsigned int vertex_buffer;
 	unsigned int element_buffer;

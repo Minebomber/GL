@@ -25,7 +25,7 @@ unsigned long long strhash(const char* str) {
 static void scene_load_geometry(Scene* scene, unsigned int index, const struct aiScene* aiScn, unsigned int materialOffset);
 static void scene_load_materials(Scene* scene, const char* path, const struct aiScene* aiScn);
 static void scene_load_texture(Scene* scene, Texture** texture, const char* path, const struct aiMaterial* aiMat, enum aiTextureType type);
-static void scene_load_node(Scene* scene, Node** node, const struct aiScene* aiScn, const struct aiNode* aiNd, Node* parent, unsigned int geometryIdx);
+static void scene_load_node(Scene* scene, Node** node, const struct aiScene* aiScn, const struct aiNode* aiNd, Node* parent, unsigned int geometryIdx, unsigned int partOffset);
 static void node_world_transform(Node* node, mat4 dest);
 
 void scene_init(Scene* scene) {
@@ -102,21 +102,21 @@ void scene_load(Scene* scene, const char* path, unsigned int geometryIdx, mat4 i
 		plogf(LL_ERROR, "Failed to load model: %s. %s\n", path, aiGetErrorString());
 	}
 
-	unsigned int materialOffset = scene->n_materials;
-	scene_load_geometry(scene, geometryIdx, aiScn, materialOffset);
+	unsigned int partOffset = scene->geometry[geometryIdx].n_parts;
+	scene_load_geometry(scene, geometryIdx, aiScn, scene->n_materials);
 	scene_load_materials(scene, path, aiScn);
-
+	Node** node = &scene->nodes[scene->n_nodes++];
 	scene_load_node(
 		scene,
-		&scene->nodes[scene->n_nodes],
+		node,
 		aiScn,
 		aiScn->mRootNode,
 		NULL,
-		geometryIdx
+		geometryIdx,
+		partOffset
 	);
-
-	Node* node = scene->nodes[scene->n_nodes++];
-	glm_mat4_copy(initialTransform, node->transform);
+	plogf(LL_INFO, "Applying transform\n");
+	glm_mat4_copy(initialTransform, (*node)->transform);
 }
 
 static int part_compare(const void* a, const void* b) {
@@ -170,6 +170,7 @@ void scene_build_cache(Scene* scene) {
 		while (nQueue) {
 			Node* n = queue[--nQueue];
 			for (unsigned int j = 0; j < n->n_parts; j++) {
+				plogf(LL_INFO, "Inserting part %u, %u\n", j, n_parts);
 				CachePart* cached = &parts[n_parts++];
 				cached->part = node_parts(n)[j];
 				cached->node = n;
@@ -275,7 +276,7 @@ void scene_render(Scene* scene) {
 		CacheObject* cached = &scene->cache[i];
 		glBindVertexArray(cached->geometry->vertex_array);
 		glBindBuffer(GL_DRAW_INDIRECT_BUFFER, cached->geometry->indirect_buffer);
-		glMultiDrawElementsIndirect(GL_TRIANGLES, GL_UNSIGNED_INT, 0, cached->n_commands, 0);
+		glMultiDrawElementsIndirect(cached->geometry->primitive, GL_UNSIGNED_INT, 0, cached->n_commands, 0);
 	}
 }
 
@@ -390,7 +391,9 @@ static void scene_load_geometry(Scene* scene, unsigned int geometryIndex, const 
 		glCreateBuffers(1, &g->element_buffer);
 		glNamedBufferData(g->element_buffer, nIndices * sizeof(unsigned int), indices, GL_STATIC_DRAW);
 		g->n_indices = nIndices;
+		
 		scene->n_geometry++;
+		g->primitive = GL_TRIANGLES;
 
 		glEnableVertexArrayAttrib(g->vertex_array, ATTR_POSITION);
 		glVertexArrayAttribBinding(g->vertex_array, ATTR_POSITION, 0);
@@ -497,7 +500,7 @@ static void scene_load_texture(Scene* scene, Texture** texture, const char* path
 	plogf(LL_INFO, "Loaded texture: %s : %llu\n", buffer, key);
 }
 
-static void scene_load_node(Scene* scene, Node** node, const struct aiScene* aiScn, const struct aiNode* aiNd, Node* parent, unsigned int geometryIdx) {
+static void scene_load_node(Scene* scene, Node** node, const struct aiScene* aiScn, const struct aiNode* aiNd, Node* parent, unsigned int geometryIdx, unsigned int partOffset) {
 	Node* nd = node_new(aiNd->mNumMeshes, aiNd->mNumChildren);
 	plogf(LL_INFO, "Created node: %s\n", aiNd->mName.data);
 	if (!nd) {
@@ -517,7 +520,7 @@ static void scene_load_node(Scene* scene, Node** node, const struct aiScene* aiS
 	nd->geometry = &scene->geometry[geometryIdx];
 
 	for (unsigned int i = 0; i < aiNd->mNumMeshes; i++) {
-		node_parts(nd)[i] = &nd->geometry->parts[aiNd->mMeshes[i]];
+		node_parts(nd)[i] = &nd->geometry->parts[partOffset + aiNd->mMeshes[i]];
 	}
 	for (unsigned int i = 0; i < aiNd->mNumChildren; i++) {
 		scene_load_node(
@@ -526,7 +529,8 @@ static void scene_load_node(Scene* scene, Node** node, const struct aiScene* aiS
 			aiScn,
 			aiNd->mChildren[i],
 			nd,
-			geometryIdx
+			geometryIdx,
+			partOffset
 		);
 	}
 }
