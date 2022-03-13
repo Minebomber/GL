@@ -20,6 +20,8 @@
 
 #define LIGHT_MAX 8
 
+#define N_SIDE 16
+
 enum UBO_BINDING {
 	UBO_GLOBAL,
 	UBO_CAMERA,
@@ -181,28 +183,17 @@ void on_setup(Application* app) {
 	floorPart->base_index = cubePart->base_index;
 	floorPart->base_vertex = cubePart->base_vertex;
 	floorPart->material = 2;
-	// Create node & transform for floor
-	Node* floorNode = node_new(1, 0);
-	floorNode->geometry = &app->scene.geometry[0];
-	glm_mat4_identity(modelMatrix);
-	glm_translate(modelMatrix, (vec3){ 0, -2, 0 });
-	glm_scale(modelMatrix, (vec3){ 25, 1, 25 });
-	glm_mat4_copy(modelMatrix, floorNode->transform);
-	node_parts(floorNode)[0] = floorPart;
-	app->scene.nodes[app->scene.n_nodes++] = floorNode;
-
+	
 	for (unsigned int i = 0; i < N_SIDE; i++) {
 		for (unsigned int j = 0; j < N_SIDE; j++) {
-			for (unsigned int k = 0; k < N_SIDE; k++) {
-				float x = (2.0f * i) - (N_SIDE);
-				float y = 4.0f + (2.0f * j);
-				float z = (2.0f * k) - (N_SIDE);
-				Node* iCubeNode = node_new(1, 0);
-				iCubeNode->geometry = &app->scene.geometry[0];
-				glm_translate_make(iCubeNode->transform, (vec3) { x, y, z });
-				node_parts(iCubeNode)[0] = cubePart;
-				app->scene.nodes[app->scene.n_nodes++] = iCubeNode;
-			}
+			float x = (2.0f * i) - (N_SIDE);
+			float y = -2.0f;
+			float z = (2.0f * j) - (N_SIDE);
+			Node* iCubeNode = node_new(1, 0);
+			iCubeNode->geometry = &app->scene.geometry[0];
+			glm_translate_make(iCubeNode->transform, (vec3) { x, y, z });
+			node_parts(iCubeNode)[0] = floorPart;
+			app->scene.nodes[app->scene.n_nodes++] = iCubeNode;
 		}
 	}
 

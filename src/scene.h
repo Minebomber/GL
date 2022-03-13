@@ -4,13 +4,12 @@
 #include <stdint.h>
 #include <cglm/cglm.h>
 
-#define N_SIDE 8
 
 #define GEOMETRY_MAX 8
 #define MATERIAL_MAX 8
-#define TRANSFORM_MAX N_SIDE * N_SIDE * N_SIDE * N_SIDE
+#define TRANSFORM_MAX 512
 #define NODE_MAX TRANSFORM_MAX
-#define PART_MAX 128
+#define PART_MAX TRANSFORM_MAX
 #define TEXTURE_MAX 8
 
 enum ATTR_LOCATION {
@@ -93,24 +92,24 @@ typedef struct {
 	unsigned int assign_buffer;
 
 	unsigned int n_materials;
-	Material materials[MATERIAL_MAX];
+	Material* materials;
 	unsigned int material_buffer;
 
 	unsigned int n_textures;
-	Texture textures[TEXTURE_MAX];
+	Texture* textures;
 
 	unsigned int transform_buffer;
 	unsigned int transform_texture;
 	uint64_t transform_handle;
 
 	unsigned int n_geometry;
-	Geometry geometry[GEOMETRY_MAX];
+	Geometry* geometry;
 
 	unsigned int n_nodes;
-	Node* nodes[NODE_MAX];
+	Node** nodes;
 
 	unsigned int n_cache;
-	CacheObject cache[GEOMETRY_MAX];
+	CacheObject* cache;
 } Scene;
 
 void scene_init(Scene* scene);

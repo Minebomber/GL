@@ -29,6 +29,12 @@ static void scene_load_node(Scene* scene, Node** node, const struct aiScene* aiS
 static void node_world_transform(Node* node, mat4 dest);
 
 void scene_init(Scene* scene) {
+	scene->materials = calloc(MATERIAL_MAX, sizeof(Material));
+	scene->textures = calloc(TEXTURE_MAX, sizeof(Texture));
+	scene->geometry = calloc(GEOMETRY_MAX, sizeof(Geometry));
+	scene->nodes = calloc(NODE_MAX, sizeof(Node*));
+	scene->cache = calloc(TRANSFORM_MAX, sizeof(CacheObject));
+
 	glCreateBuffers(1, &scene->material_buffer);
 	glNamedBufferData(scene->material_buffer, 32 * MATERIAL_MAX, NULL, GL_STATIC_DRAW);
 	glBindBufferBase(GL_UNIFORM_BUFFER, 2, scene->material_buffer);
@@ -74,7 +80,6 @@ void scene_destroy(Scene* scene) {
 		glDeleteBuffers(1, &g->element_buffer);
 		glDeleteVertexArrays(1, &g->vertex_array);
 		glDeleteBuffers(1, &g->indirect_buffer);
-		*g = (Geometry){ 0 };
 	}
 
 	for (unsigned int i = 0; i < TEXTURE_MAX; i++) {
@@ -82,15 +87,17 @@ void scene_destroy(Scene* scene) {
 		if (!t->key) continue;
 		if (t->handle) glMakeTextureHandleNonResidentARB(t->handle);
 		if (t->texture) glDeleteTextures(1, &t->texture);
-		*t = (Texture){ 0 };
 	}
-	for (unsigned int i = 0; i < scene->n_materials; i++) {
-		scene->materials[i] = (Material){ 0 };
-	}
-
+	
 	for (unsigned int i = 0; i < scene->n_nodes; i++) {
 		node_delete(&scene->nodes[i]);
 	}
+
+	free(scene->materials);
+	free(scene->textures);
+	free(scene->geometry);
+	free(scene->nodes);
+	free(scene->cache);
 }
 
 void scene_load(Scene* scene, const char* path, unsigned int geometryIdx, mat4 initialTransform, bool flipUVs) {
