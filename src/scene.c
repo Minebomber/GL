@@ -535,7 +535,7 @@ static void node_world_transform(Node* node, mat4 dest) {
 	glm_mat4_copy(node->transform, dest);
 	Node* parent = node->parent;
 	while (parent) {
-		glm_mat4_mul(dest, parent->transform, dest);
+		glm_mat4_mul(parent->transform, dest, dest);
 		parent = parent->parent;
 	}
 }
