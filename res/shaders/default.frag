@@ -68,6 +68,8 @@ void main() {
 	}
 
 	o_fragColor = vec4(result, 1.0);
+
+	// Display normals
 	//o_fragColor = vec4((normal + 1.0) / 2.0, 1.0);
 }
 
@@ -81,8 +83,8 @@ vec3 lighting(Light light, vec3 normal, vec3 viewDirection, vec3 diffuseColor, v
 	float diffuseFactor = max(dot(normal, lightDirection), 0.0);
 	vec3 diffuse = light.diffuseCutOff.rgb * diffuseFactor * diffuseColor;
 	
-	vec3 reflectDirection = reflect(-lightDirection, normal);
-	float specularFactor = pow(max(dot(viewDirection, reflectDirection), 0.0), shininess);
+	vec3 halfwayDirection = normalize(lightDirection + viewDirection);
+	float specularFactor = pow(max(dot(normal, halfwayDirection), 0.0), shininess);
 	vec3 specular = light.specularOuterCutOff.rgb * specularFactor * specularColor;
 
 	if (light.type == LIGHT_SPOT) {
