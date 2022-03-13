@@ -208,6 +208,8 @@ void on_setup(Application* app) {
 
 	glm_mat4_identity(modelMatrix);
 	scene_load(&app->scene, "res/models/backpack/backpack.obj", 0, modelMatrix, false);
+	glm_translate(modelMatrix, (vec3){ 0, 0, 5 });
+	scene_load(&app->scene, "res/models/cube/cube.obj", 0, modelMatrix, false);
 
 	scene_build_cache(&app->scene);
 

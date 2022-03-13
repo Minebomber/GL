@@ -170,7 +170,6 @@ void scene_build_cache(Scene* scene) {
 		while (nQueue) {
 			Node* n = queue[--nQueue];
 			for (unsigned int j = 0; j < n->n_parts; j++) {
-				plogf(LL_INFO, "Inserting part %u, %u\n", j, n_parts);
 				CachePart* cached = &parts[n_parts++];
 				cached->part = node_parts(n)[j];
 				cached->node = n;
@@ -216,7 +215,6 @@ void scene_build_cache(Scene* scene) {
 		}
 		// Switch command if part changes (vertices/indices, not on material change)
 		if (part_compare(cachePart->part, currentPart)) {
-			plogf(LL_INFO, "Switching part\n");
 			currentPart = cachePart->part;
 			command = &commands[currentCache->n_commands++];
 			// Initialize new command
@@ -236,6 +234,7 @@ void scene_build_cache(Scene* scene) {
 	free(parts);
 	// Last processed geometry didn't get switched, save it (if parts > 0)
 	if (currentGeometry) {
+		plogf(LL_INFO, "Writing indirect buffer\n");
 		glCreateBuffers(1, &currentGeometry->indirect_buffer);
 		glNamedBufferData(
 			currentGeometry->indirect_buffer,
@@ -253,18 +252,24 @@ void scene_build_cache(Scene* scene) {
 	for (unsigned int i = 0; i < scene->n_materials; i++) {
 		Material* mat = &scene->materials[i];
 		if (mat->diffuse && mat->diffuse->texture) {
-			mat->diffuse->handle = glGetTextureHandleARB(mat->diffuse->texture);
-			glMakeTextureHandleResidentARB(mat->diffuse->handle);
+			if (!mat->diffuse->handle) {
+				mat->diffuse->handle = glGetTextureHandleARB(mat->diffuse->texture);
+				glMakeTextureHandleResidentARB(mat->diffuse->handle);
+			}
 			glNamedBufferSubData(scene->material_buffer, i * 32, 8, &mat->diffuse->handle);
 		}
 		if (mat->specular && mat->specular->texture) {
-			mat->specular->handle = glGetTextureHandleARB(mat->specular->texture);
-			glMakeTextureHandleResidentARB(mat->specular->handle);
-			glNamedBufferSubData(scene->material_buffer, i * 32 + 8, 8, &mat->specular->handle);
+			if (!mat->specular->handle) {
+				mat->specular->handle = glGetTextureHandleARB(mat->specular->texture);
+				glMakeTextureHandleResidentARB(mat->specular->handle);
+				glNamedBufferSubData(scene->material_buffer, i * 32 + 8, 8, &mat->specular->handle);
+			}
 		}
 		if (mat->normal && mat->normal->texture) {
-			mat->normal->handle = glGetTextureHandleARB(mat->normal->texture);
-			glMakeTextureHandleResidentARB(mat->normal->handle);
+			if (!mat->normal->handle) {
+				mat->normal->handle = glGetTextureHandleARB(mat->normal->texture);
+				glMakeTextureHandleResidentARB(mat->normal->handle);
+			}
 			glNamedBufferSubData(scene->material_buffer, i * 32 + 16, 8, &mat->normal->handle);
 		}
 		glNamedBufferSubData(scene->material_buffer, i * 32 + 24, sizeof(float), &mat->shininess);
