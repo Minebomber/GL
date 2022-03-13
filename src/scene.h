@@ -10,7 +10,8 @@
 #define MATERIAL_MAX 8
 #define TRANSFORM_MAX N_SIDE * N_SIDE * N_SIDE * N_SIDE
 #define NODE_MAX TRANSFORM_MAX
-#define PART_MAX 8
+#define PART_MAX 128
+#define TEXTURE_MAX 8
 
 enum ATTR_LOCATION {
 	ATTR_ASSIGN,
@@ -41,6 +42,8 @@ typedef struct {
 	unsigned int vertex_buffer;
 	unsigned int element_buffer;
 	unsigned int indirect_buffer;
+	unsigned int n_vertices;
+	unsigned int n_indices;
 	unsigned int n_parts;
 	Part parts[PART_MAX];
 } Geometry;
@@ -55,14 +58,15 @@ typedef struct Node {
 } Node;
 
 typedef struct {
+	unsigned long long key;
 	unsigned int texture;
 	uint64_t handle;
 } Texture;
 
 typedef struct {
-	Texture diffuse;
-	Texture specular;
-	Texture normal;
+	Texture* diffuse;
+	Texture* specular;
+	Texture* normal;
 	float shininess;
 } Material;
 
@@ -91,6 +95,9 @@ typedef struct {
 	Material materials[MATERIAL_MAX];
 	unsigned int material_buffer;
 
+	unsigned int n_textures;
+	Texture textures[TEXTURE_MAX];
+
 	unsigned int transform_buffer;
 	unsigned int transform_texture;
 	uint64_t transform_handle;
@@ -107,9 +114,12 @@ typedef struct {
 
 void scene_init(Scene* scene);
 void scene_destroy(Scene* scene);
-void scene_load(Scene* scene, const char* path, mat4 initialTransform, bool flipUVs);
+void scene_load(Scene* scene, const char* path, unsigned int geometryIdx,mat4 initialTransform, bool flipUVs);
 void scene_build_cache(Scene* scene);
 void scene_render(Scene* scene);
+Texture* scene_find_texture(Scene* scene, unsigned long long key);
+Texture* scene_insert_texture(Scene* scene, unsigned long long key, unsigned int texture);
+unsigned long long strhash(const char* str);
 
 Node* node_new(unsigned int nParts, unsigned int nChildren);
 void node_delete(Node** node);

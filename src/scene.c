@@ -13,10 +13,19 @@ Node** node_children(const Node* node);
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 
-static void scene_load_geometry(Scene* scene, const struct aiScene* aiScn, unsigned int materialOffset);
+unsigned long long strhash(const char* str) {
+	unsigned long long hash = 0;
+	while (*str) {
+		hash += *str + 15 * hash;
+		str++;
+	}
+	return hash;
+}
+
+static void scene_load_geometry(Scene* scene, unsigned int index, const struct aiScene* aiScn, unsigned int materialOffset);
 static void scene_load_materials(Scene* scene, const char* path, const struct aiScene* aiScn);
-static void scene_load_texture(unsigned int* texture, const char* path, const struct aiMaterial* aiMat, enum aiTextureType type);
-static void scene_load_node(Scene* scene, Node** node, const struct aiScene* aiScn, const struct aiNode* aiNd, Node* parent, unsigned int geometryOffset);
+static void scene_load_texture(Scene* scene, Texture** texture, const char* path, const struct aiMaterial* aiMat, enum aiTextureType type);
+static void scene_load_node(Scene* scene, Node** node, const struct aiScene* aiScn, const struct aiNode* aiNd, Node* parent, unsigned int geometryIdx);
 static void node_world_transform(Node* node, mat4 dest);
 
 void scene_init(Scene* scene) {
@@ -68,13 +77,15 @@ void scene_destroy(Scene* scene) {
 		*g = (Geometry){ 0 };
 	}
 
+	for (unsigned int i = 0; i < TEXTURE_MAX; i++) {
+		Texture* t = &scene->textures[i];
+		if (!t->key) continue;
+		if (t->handle) glMakeTextureHandleNonResidentARB(t->handle);
+		if (t->texture) glDeleteTextures(1, &t->texture);
+		*t = (Texture){ 0 };
+	}
 	for (unsigned int i = 0; i < scene->n_materials; i++) {
-		Material* m = &scene->materials[i];
-		if (m->diffuse.handle) glMakeTextureHandleNonResidentARB(m->diffuse.handle);
-		if (m->diffuse.texture)	glDeleteTextures(1, &m->diffuse.texture);
-		if (m->specular.handle) glMakeTextureHandleNonResidentARB(m->specular.handle);
-		if (m->specular.texture)	glDeleteTextures(1, &m->specular.texture);
-		*m = (Material){ 0 };
+		scene->materials[i] = (Material){ 0 };
 	}
 
 	for (unsigned int i = 0; i < scene->n_nodes; i++) {
@@ -82,7 +93,7 @@ void scene_destroy(Scene* scene) {
 	}
 }
 
-void scene_load(Scene* scene, const char* path, mat4 initialTransform, bool flipUVs) {
+void scene_load(Scene* scene, const char* path, unsigned int geometryIdx, mat4 initialTransform, bool flipUVs) {
 	const struct aiScene* aiScn = aiImportFile(
 		path,
 		(flipUVs ? aiProcess_FlipUVs : 0) | aiProcess_CalcTangentSpace | aiProcess_Triangulate | aiProcess_JoinIdenticalVertices | aiProcess_SortByPType
@@ -91,9 +102,8 @@ void scene_load(Scene* scene, const char* path, mat4 initialTransform, bool flip
 		plogf(LL_ERROR, "Failed to load model: %s. %s\n", path, aiGetErrorString());
 	}
 
-	unsigned int geometryOffset = scene->n_geometry;
 	unsigned int materialOffset = scene->n_materials;
-	scene_load_geometry(scene, aiScn, materialOffset);
+	scene_load_geometry(scene, geometryIdx, aiScn, materialOffset);
 	scene_load_materials(scene, path, aiScn);
 
 	scene_load_node(
@@ -102,11 +112,11 @@ void scene_load(Scene* scene, const char* path, mat4 initialTransform, bool flip
 		aiScn,
 		aiScn->mRootNode,
 		NULL,
-		geometryOffset
+		geometryIdx
 	);
 
 	Node* node = scene->nodes[scene->n_nodes++];
-	glm_mat4_mul(initialTransform, node->transform, node->transform);
+	glm_mat4_copy(initialTransform, node->transform);
 }
 
 static int part_compare(const void* a, const void* b) {
@@ -218,7 +228,6 @@ void scene_build_cache(Scene* scene) {
 		// Setup instance transform and assign
 		command->n_instance++;
 		node_world_transform(cachePart->node, transform[nTransform]);
-		plogf(LL_INFO, "Adding assign { %u, %u }\n", cachePart->part->material, nTransform);
 		ivec2 assign = { cachePart->part->material, nTransform };
 		glNamedBufferSubData(scene->assign_buffer, nTransform * sizeof(ivec2), sizeof(ivec2), assign);
 		nTransform++;
@@ -242,20 +251,20 @@ void scene_build_cache(Scene* scene) {
 	// Buffer materials
 	for (unsigned int i = 0; i < scene->n_materials; i++) {
 		Material* mat = &scene->materials[i];
-		if (mat->diffuse.texture) {
-			mat->diffuse.handle = glGetTextureHandleARB(mat->diffuse.texture);
-			glMakeTextureHandleResidentARB(mat->diffuse.handle);
-			glNamedBufferSubData(scene->material_buffer, i * 32, 8, &mat->diffuse.handle);
+		if (mat->diffuse && mat->diffuse->texture) {
+			mat->diffuse->handle = glGetTextureHandleARB(mat->diffuse->texture);
+			glMakeTextureHandleResidentARB(mat->diffuse->handle);
+			glNamedBufferSubData(scene->material_buffer, i * 32, 8, &mat->diffuse->handle);
 		}
-		if (mat->specular.texture) {
-			mat->specular.handle = glGetTextureHandleARB(mat->specular.texture);
-			glMakeTextureHandleResidentARB(mat->specular.handle);
-			glNamedBufferSubData(scene->material_buffer, i * 32 + 8, 8, &mat->specular.handle);
+		if (mat->specular && mat->specular->texture) {
+			mat->specular->handle = glGetTextureHandleARB(mat->specular->texture);
+			glMakeTextureHandleResidentARB(mat->specular->handle);
+			glNamedBufferSubData(scene->material_buffer, i * 32 + 8, 8, &mat->specular->handle);
 		}
-		if (mat->normal.texture) {
-			mat->normal.handle = glGetTextureHandleARB(mat->normal.texture);
-			glMakeTextureHandleResidentARB(mat->normal.handle);
-			glNamedBufferSubData(scene->material_buffer, i * 32 + 16, 8, &mat->normal.handle);
+		if (mat->normal && mat->normal->texture) {
+			mat->normal->handle = glGetTextureHandleARB(mat->normal->texture);
+			glMakeTextureHandleResidentARB(mat->normal->handle);
+			glNamedBufferSubData(scene->material_buffer, i * 32 + 16, 8, &mat->normal->handle);
 		}
 		glNamedBufferSubData(scene->material_buffer, i * 32 + 24, sizeof(float), &mat->shininess);
 	}
@@ -299,13 +308,13 @@ void node_resize(Node** node, unsigned int nParts, unsigned int nChildren) {
 	*node = new;
 }
 
-static void scene_load_geometry(Scene* scene, const struct aiScene* aiScn, unsigned int materialOffset) {
-	Geometry* g = &scene->geometry[scene->n_geometry++];
-	if (scene->n_geometry > GEOMETRY_MAX) {
+static void scene_load_geometry(Scene* scene, unsigned int geometryIndex, const struct aiScene* aiScn, unsigned int materialOffset) {
+	if (geometryIndex > GEOMETRY_MAX) {
 		plogf(LL_ERROR, "Geometry out of bounds\n");
 		return;
 	}
-	
+	Geometry* g = &scene->geometry[geometryIndex];
+
 	size_t nVertices = 0, nIndices = 0;
 	for (unsigned int i = 0; i < aiScn->mNumMeshes; i++) {
 		const struct aiMesh* aiMsh = aiScn->mMeshes[i];
@@ -326,8 +335,8 @@ static void scene_load_geometry(Scene* scene, const struct aiScene* aiScn, unsig
 			free(vertices); free(indices);
 			return;
 		}
-		p->base_vertex = vIdx;
-		p->base_index = iIdx;
+		p->base_vertex = vIdx + g->n_vertices;
+		p->base_index = iIdx + g->n_indices;
 
 		const struct aiMesh* aiMsh = aiScn->mMeshes[i];
 		
@@ -349,43 +358,72 @@ static void scene_load_geometry(Scene* scene, const struct aiScene* aiScn, unsig
 		}
 	}
 
-	glCreateVertexArrays(1, &g->vertex_array);
-	glCreateBuffers(1, &g->vertex_buffer);
-	glNamedBufferData(g->vertex_buffer, nVertices * sizeof(Vertex), vertices, GL_STATIC_DRAW);
-	glCreateBuffers(1, &g->element_buffer);
-	glNamedBufferData(g->element_buffer, nIndices * sizeof(unsigned int), indices, GL_STATIC_DRAW);
+	if (g->vertex_array) {
+		// Resize
+		plogf(LL_INFO, "Resizing existing Geometry buffers\n");
+		size_t newVertices = g->n_vertices + nVertices;
+		size_t newIndices = g->n_indices + nIndices;
 
-	glEnableVertexArrayAttrib(g->vertex_array, ATTR_POSITION);
-	glVertexArrayAttribBinding(g->vertex_array, ATTR_POSITION, 0);
-	glVertexArrayAttribFormat(g->vertex_array, ATTR_POSITION, 3, GL_FLOAT, GL_FALSE, offsetof(Vertex, position));
-	
-	glEnableVertexArrayAttrib(g->vertex_array, ATTR_TEXCOORD);
-	glVertexArrayAttribBinding(g->vertex_array, ATTR_TEXCOORD, 0);
-	glVertexArrayAttribFormat(g->vertex_array, ATTR_TEXCOORD, 2, GL_FLOAT, GL_FALSE, offsetof(Vertex, texCoord));
-	
-	glEnableVertexArrayAttrib(g->vertex_array, ATTR_NORMAL);
-	glVertexArrayAttribBinding(g->vertex_array, ATTR_NORMAL, 0);
-	glVertexArrayAttribFormat(g->vertex_array, ATTR_NORMAL, 3, GL_FLOAT, GL_FALSE, offsetof(Vertex, normal));
-	
-	glEnableVertexArrayAttrib(g->vertex_array, ATTR_TANGENT);
-	glVertexArrayAttribBinding(g->vertex_array, ATTR_TANGENT, 0);
-	glVertexArrayAttribFormat(g->vertex_array, ATTR_TANGENT, 3, GL_FLOAT, GL_FALSE, offsetof(Vertex, tangent));
-	
-	glEnableVertexArrayAttrib(g->vertex_array, ATTR_BITANGENT);
-	glVertexArrayAttribBinding(g->vertex_array, ATTR_BITANGENT, 0);
-	glVertexArrayAttribFormat(g->vertex_array, ATTR_BITANGENT, 3, GL_FLOAT, GL_FALSE, offsetof(Vertex, bitangent));
+		unsigned int vertexBuffer = 0;
+		glCreateBuffers(1, &vertexBuffer);
+		glNamedBufferData(vertexBuffer, newVertices * sizeof(Vertex), NULL, GL_STATIC_DRAW);
+		glCopyNamedBufferSubData(g->vertex_buffer, vertexBuffer, 0, 0, sizeof(Vertex) * g->n_vertices);
+		glNamedBufferSubData(vertexBuffer, sizeof(Vertex) * g->n_vertices, sizeof(Vertex) * nVertices, vertices);
+		g->n_vertices = newVertices;
+		glDeleteBuffers(1, &g->vertex_buffer);
+		g->vertex_buffer = vertexBuffer;
+
+		unsigned int elementBuffer = 0;
+		glCreateBuffers(1, &elementBuffer);
+		glNamedBufferData(elementBuffer, newIndices * sizeof(unsigned int), NULL, GL_STATIC_DRAW);
+		glCopyNamedBufferSubData(g->element_buffer, elementBuffer, 0, 0, sizeof(unsigned int) * g->n_indices);
+		glNamedBufferSubData(elementBuffer, sizeof(unsigned int) * g->n_indices, sizeof(unsigned int) * nIndices, indices);
+		g->n_indices = newIndices;
+		glDeleteBuffers(1, &g->element_buffer);
+		g->element_buffer = elementBuffer;
+	} else {
+		plogf(LL_INFO, "Creating new Geometry buffers\n");
+		glCreateVertexArrays(1, &g->vertex_array);
+		glCreateBuffers(1, &g->vertex_buffer);
+		glNamedBufferData(g->vertex_buffer, nVertices * sizeof(Vertex), vertices, GL_STATIC_DRAW);
+		g->n_vertices = nVertices;
+		glCreateBuffers(1, &g->element_buffer);
+		glNamedBufferData(g->element_buffer, nIndices * sizeof(unsigned int), indices, GL_STATIC_DRAW);
+		g->n_indices = nIndices;
+		scene->n_geometry++;
+
+		glEnableVertexArrayAttrib(g->vertex_array, ATTR_POSITION);
+		glVertexArrayAttribBinding(g->vertex_array, ATTR_POSITION, 0);
+		glVertexArrayAttribFormat(g->vertex_array, ATTR_POSITION, 3, GL_FLOAT, GL_FALSE, offsetof(Vertex, position));
+		
+		glEnableVertexArrayAttrib(g->vertex_array, ATTR_TEXCOORD);
+		glVertexArrayAttribBinding(g->vertex_array, ATTR_TEXCOORD, 0);
+		glVertexArrayAttribFormat(g->vertex_array, ATTR_TEXCOORD, 2, GL_FLOAT, GL_FALSE, offsetof(Vertex, texCoord));
+		
+		glEnableVertexArrayAttrib(g->vertex_array, ATTR_NORMAL);
+		glVertexArrayAttribBinding(g->vertex_array, ATTR_NORMAL, 0);
+		glVertexArrayAttribFormat(g->vertex_array, ATTR_NORMAL, 3, GL_FLOAT, GL_FALSE, offsetof(Vertex, normal));
+		
+		glEnableVertexArrayAttrib(g->vertex_array, ATTR_TANGENT);
+		glVertexArrayAttribBinding(g->vertex_array, ATTR_TANGENT, 0);
+		glVertexArrayAttribFormat(g->vertex_array, ATTR_TANGENT, 3, GL_FLOAT, GL_FALSE, offsetof(Vertex, tangent));
+		
+		glEnableVertexArrayAttrib(g->vertex_array, ATTR_BITANGENT);
+		glVertexArrayAttribBinding(g->vertex_array, ATTR_BITANGENT, 0);
+		glVertexArrayAttribFormat(g->vertex_array, ATTR_BITANGENT, 3, GL_FLOAT, GL_FALSE, offsetof(Vertex, bitangent));
+
+		glEnableVertexArrayAttrib(g->vertex_array, ATTR_ASSIGN);
+		glVertexArrayAttribBinding(g->vertex_array, ATTR_ASSIGN, 1);
+		glVertexArrayAttribIFormat(g->vertex_array, ATTR_ASSIGN, 2, GL_INT, 0);
+		glVertexArrayVertexBuffer(g->vertex_array, 1, scene->assign_buffer, 0, sizeof(ivec2));
+		glVertexArrayBindingDivisor(g->vertex_array, 1, 1);
+	}
 
 	glVertexArrayVertexBuffer(g->vertex_array, 0, g->vertex_buffer, 0, sizeof(Vertex));
 	glVertexArrayElementBuffer(g->vertex_array, g->element_buffer);
-	
-	glEnableVertexArrayAttrib(g->vertex_array, ATTR_ASSIGN);
-	glVertexArrayAttribBinding(g->vertex_array, ATTR_ASSIGN, 1);
-	glVertexArrayAttribIFormat(g->vertex_array, ATTR_ASSIGN, 2, GL_INT, 0);
-	glVertexArrayVertexBuffer(g->vertex_array, 1, scene->assign_buffer, 0, sizeof(ivec2));
-	glVertexArrayBindingDivisor(g->vertex_array, 1, 1);
 
-	plogf(LL_INFO, "Created geometry { vao:%u, vbo:%u, ebo:%u }; %lu vertices, %lu indices\n",
-		g->vertex_array, g->vertex_buffer, g->element_buffer, vIdx, iIdx);
+	plogf(LL_INFO, "Created geometry[%u] { vao:%u, vbo:%u, ebo:%u }; %lu vertices, %lu indices\n",
+		geometryIndex, g->vertex_array, g->vertex_buffer, g->element_buffer, vIdx, iIdx);
 }
 
 static void scene_load_materials(Scene* scene, const char* path, const struct aiScene* aiScn) {
@@ -393,23 +431,49 @@ static void scene_load_materials(Scene* scene, const char* path, const struct ai
 		Material* mat = &scene->materials[scene->n_materials++];
 		const struct aiMaterial* aiMat = aiScn->mMaterials[i];
 		if (aiGetMaterialTextureCount(aiMat, aiTextureType_DIFFUSE)) {
-			scene_load_texture(&mat->diffuse.texture, path, aiMat, aiTextureType_DIFFUSE);
+			scene_load_texture(scene, &mat->diffuse, path, aiMat, aiTextureType_DIFFUSE);
 		}
 		if (aiGetMaterialTextureCount(aiMat, aiTextureType_SPECULAR)) {
-			scene_load_texture(&mat->specular.texture, path, aiMat, aiTextureType_SPECULAR);
+			scene_load_texture(scene, &mat->specular, path, aiMat, aiTextureType_SPECULAR);
 		}
 		if (aiGetMaterialTextureCount(aiMat, aiTextureType_HEIGHT)) {
-			scene_load_texture(&mat->normal.texture, path, aiMat, aiTextureType_HEIGHT);
+			scene_load_texture(scene, &mat->normal, path, aiMat, aiTextureType_HEIGHT);
 		}
 		ai_real shininess = 32.0f;
 		mat->shininess = shininess;
-	
-		plogf(LL_INFO, "Created material[%u] { diff:%u, spec:%u, norm:%u }\n",
-			i, mat->diffuse.texture, mat->specular.texture, mat->normal.texture);
+		plogf(LL_INFO, "Created material[%u] { %u, %u, %u }\n", i, 
+			mat->diffuse ? mat->diffuse->texture : 0,
+			mat->specular ? mat->specular->texture : 0,
+			mat->normal ? mat->normal->texture : 0
+		);
 	}
 }
 
-static void scene_load_texture(unsigned int* texture, const char* path, const struct aiMaterial* aiMat, enum aiTextureType type) {
+Texture* scene_find_texture(Scene* scene, unsigned long long key) {
+	unsigned long long index = key % TEXTURE_MAX;
+	for (unsigned long long i = 0; i < TEXTURE_MAX; i++) {
+		Texture* texture = &scene->textures[(index + i) % TEXTURE_MAX];
+		if (texture->key == key) return texture;
+		if (texture->key == 0) return NULL;
+	}
+	return NULL;
+}
+
+Texture* scene_insert_texture(Scene* scene, unsigned long long key, unsigned int texture) {
+	unsigned long long index = key % TEXTURE_MAX;
+	for (unsigned long long i = 0; i < TEXTURE_MAX; i++) {
+		Texture* cached = &scene->textures[(index + i) % TEXTURE_MAX];
+		if (cached->key == key) return cached;
+		if (cached->key == 0) {
+			cached->key = key;
+			cached->texture = texture;
+			return cached;
+		} 
+	}
+	return NULL;
+}
+
+static void scene_load_texture(Scene* scene, Texture** texture, const char* path, const struct aiMaterial* aiMat, enum aiTextureType type) {
 	struct aiString name;
 	aiGetMaterialTexture(aiMat, type, 0, &name, NULL, NULL, NULL, NULL, NULL, NULL);
 
@@ -418,13 +482,22 @@ static void scene_load_texture(unsigned int* texture, const char* path, const st
 	strcpy(buffer, path);
 	char* dirMark = strrchr(buffer, '/');
 	strcpy(dirMark + 1, name.data);
-	if (!load_texture(texture, buffer, true, GL_REPEAT, GL_REPEAT, GL_LINEAR_MIPMAP_LINEAR, GL_LINEAR)) {
+
+	unsigned long long key = strhash(buffer);
+	Texture* cached = scene_find_texture(scene, key);
+	if (cached) {
+		*texture = cached;
+		return;
+	}
+	unsigned int id = 0;
+	if (!load_texture(&id, buffer, true, GL_REPEAT, GL_REPEAT, GL_LINEAR_MIPMAP_LINEAR, GL_LINEAR)) {
 		plogf(LL_ERROR, "Failed to load material texture: %s\n", buffer);
 	}
-	plogf(LL_INFO, "Loaded texture: %s\n", path);
+	*texture = scene_insert_texture(scene, key, id);
+	plogf(LL_INFO, "Loaded texture: %s : %llu\n", buffer, key);
 }
 
-static void scene_load_node(Scene* scene, Node** node, const struct aiScene* aiScn, const struct aiNode* aiNd, Node* parent, unsigned int geometryOffset) {
+static void scene_load_node(Scene* scene, Node** node, const struct aiScene* aiScn, const struct aiNode* aiNd, Node* parent, unsigned int geometryIdx) {
 	Node* nd = node_new(aiNd->mNumMeshes, aiNd->mNumChildren);
 	plogf(LL_INFO, "Created node: %s\n", aiNd->mName.data);
 	if (!nd) {
@@ -441,10 +514,10 @@ static void scene_load_node(Scene* scene, Node** node, const struct aiScene* aiS
 		{ aiNd->mTransformation.a4, aiNd->mTransformation.b4, aiNd->mTransformation.c4, aiNd->mTransformation.d4 } 
 	}, nd->transform);
 
-	nd->geometry = &scene->geometry[geometryOffset];
+	nd->geometry = &scene->geometry[geometryIdx];
 
 	for (unsigned int i = 0; i < aiNd->mNumMeshes; i++) {
-		node_parts(nd)[i] = &scene->geometry[scene->n_geometry - 1].parts[aiNd->mMeshes[i]];
+		node_parts(nd)[i] = &nd->geometry->parts[aiNd->mMeshes[i]];
 	}
 	for (unsigned int i = 0; i < aiNd->mNumChildren; i++) {
 		scene_load_node(
@@ -453,7 +526,7 @@ static void scene_load_node(Scene* scene, Node** node, const struct aiScene* aiS
 			aiScn,
 			aiNd->mChildren[i],
 			nd,
-			geometryOffset
+			geometryIdx
 		);
 	}
 }
@@ -462,7 +535,7 @@ static void node_world_transform(Node* node, mat4 dest) {
 	glm_mat4_copy(node->transform, dest);
 	Node* parent = node->parent;
 	while (parent) {
-		glm_mat4_mul(parent->transform, dest, dest);
+		glm_mat4_mul(dest, parent->transform, dest);
 		parent = parent->parent;
 	}
 }

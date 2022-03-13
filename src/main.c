@@ -20,8 +20,6 @@
 
 #define LIGHT_MAX 8
 
-#define vec3(x, y, z) (vec3){ x, y, z }
-
 enum UBO_BINDING {
 	UBO_GLOBAL,
 	UBO_CAMERA,
@@ -61,7 +59,6 @@ void on_setup(Application* app);
 void on_event(Application* app, Event* e);
 void on_update(Application* app, double frameTime);
 void on_teardown(Application* app);
-
 
 int main(const int argc, const char* argv[]) {
 	Application app = { 0 };
@@ -163,16 +160,23 @@ void on_setup(Application* app) {
 	glNamedBufferSubData(app->global_buffer, 0, 8, &app->scene.transform_handle);
 	// Load cube model
 	mat4 modelMatrix; glm_mat4_identity(modelMatrix);
-	scene_load(&app->scene, "res/models/cube/cube.obj", modelMatrix, false);
+	glm_translate(modelMatrix, (vec3){ 0, 5, 0 });
+	scene_load(&app->scene, "res/models/cube/cube.obj", 0, modelMatrix, false);
 	// Load floor material
 	Material* floorMat = &app->scene.materials[app->scene.n_materials++];
-	load_texture_color(&floorMat->diffuse.texture, (unsigned char[3]){ 85, 170, 255 });
-	load_texture_color(&floorMat->specular.texture, (unsigned char[3]){ 64, 64, 64 });
+	unsigned int floorDiffuse = 0;
+	load_texture_color(&floorDiffuse, (unsigned char[3]){ 85, 170, 255 });
+	floorMat->diffuse = scene_insert_texture(&app->scene, strhash("floorDiffuse"), floorDiffuse);
+
+	unsigned int floorSpecular = 0;
+	load_texture_color(&floorSpecular, (unsigned char[3]){ 64, 64, 64 });
+	floorMat->specular = scene_insert_texture(&app->scene, strhash("floorSpecular"), floorSpecular);
+
 	floorMat->shininess = 1.0f;
 	// Insert floor part into cube geometry (same mesh, different material)
 	Geometry* cubeGeometry = &app->scene.geometry[0];
 	Part* cubePart = &cubeGeometry->parts[0];
-	Part* floorPart = &cubeGeometry->parts[1];
+	Part* floorPart = &cubeGeometry->parts[cubeGeometry->n_parts++];
 	floorPart->n_index = cubePart->n_index;
 	floorPart->base_index = cubePart->base_index;
 	floorPart->base_vertex = cubePart->base_vertex;
@@ -180,6 +184,7 @@ void on_setup(Application* app) {
 	// Create node & transform for floor
 	Node* floorNode = node_new(1, 0);
 	floorNode->geometry = &app->scene.geometry[0];
+	glm_mat4_identity(modelMatrix);
 	glm_translate(modelMatrix, (vec3){ 0, -2, 0 });
 	glm_scale(modelMatrix, (vec3){ 25, 1, 25 });
 	glm_mat4_copy(modelMatrix, floorNode->transform);
@@ -189,9 +194,9 @@ void on_setup(Application* app) {
 	for (unsigned int i = 0; i < N_SIDE; i++) {
 		for (unsigned int j = 0; j < N_SIDE; j++) {
 			for (unsigned int k = 0; k < N_SIDE; k++) {
-				float x = 2.0f + (2.0f * i * N_SIDE) - (N_SIDE);
-				float y = 2.0f + (2.0f * j * N_SIDE) - (N_SIDE);
-				float z = 2.0f + (2.0f * k * N_SIDE) - (N_SIDE);
+				float x = (2.0f * i) - (N_SIDE);
+				float y = 4.0f + (2.0f * j);
+				float z = (2.0f * k) - (N_SIDE);
 				Node* iCubeNode = node_new(1, 0);
 				iCubeNode->geometry = &app->scene.geometry[0];
 				glm_translate_make(iCubeNode->transform, (vec3) { x, y, z });
@@ -200,121 +205,12 @@ void on_setup(Application* app) {
 			}
 		}
 	}
+	glm_mat4_identity(modelMatrix);
+	scene_load(&app->scene, "res/models/backpack/backpack.obj", 0, modelMatrix, false);
 
 	scene_build_cache(&app->scene);
 
 	load_skybox(app);
-	/*
-	// RenderObject init
-	RenderObject* obj = &app->objects[app->n_objects++];
-	obj->shader = app->shaders[0];
-	glCreateVertexArrays(1, &obj->vertex_array);
-	glCreateBuffers(1, &obj->vertex_buffer);
-	glCreateBuffers(1, &obj->element_buffer);
-
-	Vertex vertices[] = {
-		{ { -0.5f, -0.5f, -0.5f }, { 0.0f, 0.0f }, { 0.0f,  0.0f, -1.0f } },
-		{ {  0.5f, -0.5f, -0.5f }, { 1.0f, 0.0f }, { 0.0f,  0.0f, -1.0f } },
-		{ {  0.5f,  0.5f, -0.5f }, { 1.0f, 1.0f }, { 0.0f,  0.0f, -1.0f } },
-		{ { -0.5f,  0.5f, -0.5f }, { 0.0f, 1.0f }, { 0.0f,  0.0f, -1.0f } },
-																					
-		{ { -0.5f, -0.5f,  0.5f }, { 0.0f, 0.0f }, { 0.0f,  0.0f,  1.0f } },
-		{ {  0.5f, -0.5f,  0.5f }, { 1.0f, 0.0f }, { 0.0f,  0.0f,  1.0f } },
-		{ {  0.5f,  0.5f,  0.5f }, { 1.0f, 1.0f }, { 0.0f,  0.0f,  1.0f } },
-		{ { -0.5f,  0.5f,  0.5f }, { 0.0f, 1.0f }, { 0.0f,  0.0f,  1.0f } },
-																					
-		{ { -0.5f,  0.5f,  0.5f }, { 0.0f, 0.0f }, {-1.0f,  0.0f,  0.0f } },
-		{ { -0.5f,  0.5f, -0.5f }, { 1.0f, 0.0f }, {-1.0f,  0.0f,  0.0f } },
-		{ { -0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f }, {-1.0f,  0.0f,  0.0f } },
-		{ { -0.5f, -0.5f,  0.5f }, { 0.0f, 1.0f }, {-1.0f,  0.0f,  0.0f } },
-																					
-		{ {  0.5f,  0.5f,  0.5f }, { 0.0f, 0.0f }, { 1.0f,  0.0f,  0.0f } },
-		{ {  0.5f,  0.5f, -0.5f }, { 1.0f, 0.0f }, { 1.0f,  0.0f,  0.0f } },
-		{ {  0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f }, { 1.0f,  0.0f,  0.0f } },
-		{ {  0.5f, -0.5f,  0.5f }, { 0.0f, 1.0f }, { 1.0f,  0.0f,  0.0f } },
-																					
-		{ { -0.5f, -0.5f, -0.5f }, { 0.0f, 0.0f }, { 0.0f, -1.0f,  0.0f } },
-		{ {  0.5f, -0.5f, -0.5f }, { 1.0f, 0.0f }, { 0.0f, -1.0f,  0.0f } },
-		{ {  0.5f, -0.5f,  0.5f }, { 1.0f, 1.0f }, { 0.0f, -1.0f,  0.0f } },
-		{ { -0.5f, -0.5f,  0.5f }, { 0.0f, 1.0f }, { 0.0f, -1.0f,  0.0f } },
-																					
-		{ { -0.5f,  0.5f, -0.5f }, { 0.0f, 0.0f }, { 0.0f,  1.0f,  0.0f } },
-		{ {  0.5f,  0.5f, -0.5f }, { 1.0f, 0.0f }, { 0.0f,  1.0f,  0.0f } },
-		{ {  0.5f,  0.5f,  0.5f }, { 1.0f, 1.0f }, { 0.0f,  1.0f,  0.0f } },
-		{ { -0.5f,  0.5f,  0.5f }, { 0.0f, 1.0f }, { 0.0f,  1.0f,  0.0f } },
-	};
-
-	unsigned int indices[] = {
-		0,  2,  1,  2,  0,  3,
-		4,  5,  6,  6,  7,  4,
-		8,  9, 10, 10, 11,  8,
-		12, 14, 13, 14, 12, 15,
-		16, 17, 18, 18, 19, 16,
-		20, 22, 21, 22, 20, 23
-	};
-
-	glNamedBufferData(obj->vertex_buffer, sizeof(vertices), vertices, GL_STATIC_DRAW);
-	glNamedBufferData(obj->element_buffer, sizeof(indices), indices, GL_STATIC_DRAW);
-
-	glEnableVertexArrayAttrib(obj->vertex_array, ATTR_POSITION);
-	glVertexArrayAttribBinding(obj->vertex_array, ATTR_POSITION, 0);
-	glVertexArrayAttribFormat(obj->vertex_array, ATTR_POSITION, 3, GL_FLOAT, GL_FALSE, offsetof(Vertex, position));
-
-	glEnableVertexArrayAttrib(obj->vertex_array, ATTR_TEXCOORD);
-	glVertexArrayAttribBinding(obj->vertex_array, ATTR_TEXCOORD, 0);
-	glVertexArrayAttribFormat(obj->vertex_array, ATTR_TEXCOORD, 2, GL_FLOAT, GL_FALSE, offsetof(Vertex, texCoord));
-
-	glEnableVertexArrayAttrib(obj->vertex_array, ATTR_NORMAL);
-	glVertexArrayAttribBinding(obj->vertex_array, ATTR_NORMAL, 0);
-	glVertexArrayAttribFormat(obj->vertex_array, ATTR_NORMAL, 3, GL_FLOAT, GL_FALSE, offsetof(Vertex, normal));
-
-	glVertexArrayVertexBuffer(obj->vertex_array, 0, obj->vertex_buffer, 0, sizeof(Vertex));
-	glVertexArrayElementBuffer(obj->vertex_array, obj->element_buffer);
-
-	glEnableVertexArrayAttrib(obj->vertex_array, ATTR_ASSIGN);
-	glVertexArrayAttribBinding(obj->vertex_array, ATTR_ASSIGN, 1);
-	glVertexArrayAttribIFormat(obj->vertex_array, ATTR_ASSIGN, 2, GL_INT, 0);
-	glVertexArrayVertexBuffer(obj->vertex_array, 1, app->assign_buffer, 0, sizeof(ivec2));
-	glVertexArrayBindingDivisor(obj->vertex_array, 1, 1);
-
-	unsigned int currentIndex = 0;
-	for (int i = 0; i < N_CUBE; i++) {
-		for (int j = 0; j < N_CUBE; j++) {
-			for (int k = 0; k < N_CUBE; k++) {
-				mat4 modelMatrix; glm_translate_make(modelMatrix, (vec3) { i * 4.0f, j * 4.0f, k * 4.0f });
-				glNamedBufferSubData(app->matrix_buffer, currentIndex * sizeof(mat4), sizeof(mat4), modelMatrix[0]);
-				ivec2 assign = { 0, currentIndex };
-				glNamedBufferSubData(app->assign_buffer, currentIndex++ * sizeof(int) * 2, sizeof(int) * 2, assign);
-			}
-		}
-	}
-	for (int i = 0; i < N_CUBE; i++) {
-		for (int j = 0; j < N_CUBE; j++) {
-			for (int k = 0; k < N_CUBE; k++) {
-				mat4 modelMatrix; glm_translate_make(modelMatrix, (vec3) { 2.0f + i * 4.0f, 2.0f + j * 4.0f, 2.0f + k * 4.0f });
-				glNamedBufferSubData(app->matrix_buffer, currentIndex * sizeof(mat4), sizeof(mat4), modelMatrix[0]);
-				ivec2 assign = { 1, currentIndex };
-				glNamedBufferSubData(app->assign_buffer, currentIndex++ * sizeof(int) * 2, sizeof(int) * 2, assign);
-			}
-		}
-	}
-
-	RenderPart* cube = &obj->parts[obj->n_parts++];
-	cube->primitive = GL_TRIANGLES;
-	cube->n_index = sizeof(indices) / sizeof(unsigned int);
-	cube->n_instance = N_CUBE * N_CUBE * N_CUBE;
-	cube->base_index = 0;
-	cube->base_vertex = 0;
-	cube->base_instance = 0;
-	
-	cube = &obj->parts[obj->n_parts++];
-	cube->primitive = GL_TRIANGLES;
-	cube->n_index = sizeof(indices) / sizeof(unsigned int);
-	cube->n_instance = N_CUBE * N_CUBE * N_CUBE;
-	cube->base_index = 0;
-	cube->base_vertex = 0;
-	cube->base_instance = N_CUBE * N_CUBE * N_CUBE;
-	*/
 }
 
 void load_skybox(Application* app) {
