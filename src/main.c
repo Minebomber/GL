@@ -88,6 +88,7 @@ int main(const int argc, const char* argv[]) {
 		
 		// Render
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		glUseProgram(app.shaders[SHADER_DEFAULT]);
 		scene_render(&app.scene);
 		glUseProgram(app.shaders[SHADER_SKYBOX]);
 		glBindVertexArray(app.skybox.vertex_array);
@@ -200,9 +201,6 @@ void on_setup(Application* app) {
 		}
 	}
 
-	for (unsigned int i = 0; i < app->scene.n_geometry; i++)
-		app->scene.geometry[i].shader = app->shaders[SHADER_DEFAULT];
-	
 	scene_build_cache(&app->scene);
 
 	load_skybox(app);
@@ -485,7 +483,8 @@ void on_update(Application* app, double frameTime) {
 }
 
 void on_teardown(Application* app) {
-	glDeleteProgram(app->shaders[0]);
+	glDeleteProgram(app->shaders[SHADER_DEFAULT]);
+	glDeleteProgram(app->shaders[SHADER_SKYBOX]);
 	
 	glDeleteBuffers(1, &app->global_buffer);
 	glDeleteBuffers(1, &app->camera_buffer);

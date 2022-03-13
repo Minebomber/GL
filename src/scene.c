@@ -264,7 +264,6 @@ void scene_build_cache(Scene* scene) {
 void scene_render(Scene* scene) {
 	for (unsigned int i = 0; i < scene->n_cache; i++) {
 		CacheObject* cached = &scene->cache[i];
-		glUseProgram(cached->geometry->shader);
 		glBindVertexArray(cached->geometry->vertex_array);
 		glBindBuffer(GL_DRAW_INDIRECT_BUFFER, cached->geometry->indirect_buffer);
 		glMultiDrawElementsIndirect(GL_TRIANGLES, GL_UNSIGNED_INT, 0, cached->n_commands, 0);

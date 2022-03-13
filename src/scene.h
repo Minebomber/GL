@@ -10,7 +10,7 @@
 #define MATERIAL_MAX 8
 #define TRANSFORM_MAX N_SIDE * N_SIDE * N_SIDE * N_SIDE
 #define NODE_MAX TRANSFORM_MAX
-#define PART_MAX 4
+#define PART_MAX 8
 
 enum ATTR_LOCATION {
 	ATTR_ASSIGN,
@@ -37,7 +37,6 @@ typedef struct {
 } Part;
 
 typedef struct {
-	unsigned int shader;
 	unsigned int vertex_array;
 	unsigned int vertex_buffer;
 	unsigned int element_buffer;
