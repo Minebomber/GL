@@ -33,7 +33,7 @@ void scene_init(Scene* scene) {
 	scene->textures = calloc(TEXTURE_MAX, sizeof(Texture));
 	scene->geometry = calloc(GEOMETRY_MAX, sizeof(Geometry));
 	scene->nodes = calloc(NODE_MAX, sizeof(Node*));
-	scene->cache = calloc(TRANSFORM_MAX, sizeof(CacheObject));
+	scene->cache = calloc(GEOMETRY_MAX, sizeof(CacheObject));
 
 	glCreateBuffers(1, &scene->material_buffer);
 	glNamedBufferData(scene->material_buffer, 32 * MATERIAL_MAX, NULL, GL_STATIC_DRAW);
@@ -269,8 +269,8 @@ void scene_build_cache(Scene* scene) {
 			if (!mat->specular->handle) {
 				mat->specular->handle = glGetTextureHandleARB(mat->specular->texture);
 				glMakeTextureHandleResidentARB(mat->specular->handle);
-				glNamedBufferSubData(scene->material_buffer, i * 32 + 8, 8, &mat->specular->handle);
 			}
+			glNamedBufferSubData(scene->material_buffer, i * 32 + 8, 8, &mat->specular->handle);
 		}
 		if (mat->normal && mat->normal->texture) {
 			if (!mat->normal->handle) {
